@@ -70,6 +70,9 @@ app.use('/api/:hostelId/reviews', require('./routes/reviewroute'));
 app.use('/api/booking',Bookings)
 app.use('/api/rooms', Rooms);
 app.use('/api/reviews',Reviews)
+app.get('/',(req,res)=>{
+  res.send('running')
+})
 
 
 const PORT = process.env.PORT || 5000;
