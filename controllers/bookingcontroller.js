@@ -85,9 +85,11 @@ exports.createBooking = async (req, res, next) => {
         success: false,
         message: 'Room not found'
       });
-    }
-    
-    const bedInfo = roomDoc.beds.find(b => b.bedNumber === bed);
+    } 
+      console.log('bed',roomDoc)
+
+    const bedInfo = roomDoc.beds.find(b => b._id.toString() === bed);
+    console.log(bedInfo)
     if (!bedInfo) {
       return res.status(404).json({
         success: false,

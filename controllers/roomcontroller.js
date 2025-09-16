@@ -7,7 +7,8 @@ const Hostel = require('../models/hostelschema');
 exports.getRooms = async (req, res, next) => {
   try {
     const { hostelId } = req.params;
-    
+
+    console.log(hostelId)
     const rooms = await Room.find({ hostel: hostelId })
       .populate('beds.currentOccupant', 'name email phone');
     
@@ -57,50 +58,81 @@ exports.getRoom = async (req, res, next) => {
 // @access  Private
 exports.createRoom = async (req, res, next) => {
   try {
-    const { hostelId } = req.body;
-    
+    const { hostelId, floor, roomNumber, beds, ...roomData } = req.body;
+
     // Check if hostel exists
     const hostel = await Hostel.findById(hostelId);
     if (!hostel) {
       return res.status(404).json({
         success: false,
-        message: 'Hostel not found'
+        message: "Hostel not found",
       });
     }
-    
+
     // Check ownership
-    if (hostel.owner.toString() !== req.user.id && req.user.role !== 'admin') {
+    if (hostel.owner.toString() !== req.user.id && req.user.role !== "admin") {
       return res.status(403).json({
         success: false,
-        message: 'Not authorized to add rooms to this hostel'
+        message: "Not authorized to add rooms to this hostel",
       });
     }
-    
-    // Add hostel to req.body
-    req.body.hostel = hostelId;
-    
-    const room = await Room.create(req.body);
-    
-    res.status(201).json({
-      success: true,
-      data: room
-    });
+
+    // Check if room already exists
+    let existingRoom = await Room.findOne({ hostel: hostelId, floor, roomNumber });
+
+    if (existingRoom) {
+      // ✅ Room exists → check for bed duplicates
+      const existingBedNumbers = existingRoom.beds.map((b) => b.bedNumber);
+
+      const duplicateBeds = beds.filter((b) => existingBedNumbers.includes(b.bedNumber));
+      if (duplicateBeds.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Bed(s) ${duplicateBeds.map((b) => b.bedNumber).join(", ")} already exist in room ${roomNumber}`,
+        });
+      }
+
+      // ✅ Add new beds to existing room
+      existingRoom.beds.push(...beds);
+      await existingRoom.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Beds added to existing room",
+        data: existingRoom,
+      });
+    } else {
+      // ✅ No existing room → create new
+      const newRoom = await Room.create({
+        hostel: hostelId,
+        floor,
+        roomNumber,
+        beds,
+        ...roomData,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Room created successfully",
+        data: newRoom,
+      });
+    }
   } catch (error) {
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(val => val.message);
-      
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map((val) => val.message);
       return res.status(400).json({
         success: false,
-        message: messages.join(', ')
+        message: messages.join(", "),
       });
     } else {
       res.status(500).json({
         success: false,
-        message: 'Server Error'
+        message: "Server Error",
       });
     }
   }
 };
+
 
 // @desc    Update room
 // @route   PUT /api/v1/rooms/:id
