@@ -12,9 +12,9 @@ const {
   generateMonthlyBills,
   processPaymentWebhook,
   getPaymentStats
-} = require('../controllers/payments');
+} = require('../controllers/paymentcontroller');
 
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
 // All routes are protected
 router.use(protect);

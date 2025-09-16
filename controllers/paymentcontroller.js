@@ -1,7 +1,7 @@
-const Payment = require('../models/Payment');
-const Booking = require('../models/Booking');
-const Hostel = require('../models/Hostel');
-const User = require('../models/User');
+const Payment = require('../models/paymentSchema');
+const Booking = require('../models/bookingschema');
+const Hostel = require('../models/hostelschema');
+const User = require('../models/authUser');
 
 // @desc    Get all payments
 // @route   GET /api/v1/payments
@@ -72,6 +72,9 @@ exports.getPayment = async (req, res, next) => {
 // @desc    Create payment
 // @route   POST /api/v1/payments
 // @access  Private
+// @desc    Create payment
+// @route   POST /api/v1/payments
+// @access  Private
 exports.createPayment = async (req, res, next) => {
   try {
     const { booking, amount, paymentMethod, transactionId } = req.body;
@@ -93,15 +96,26 @@ exports.createPayment = async (req, res, next) => {
       });
     }
     
+    // Generate current month in YYYY-MM format
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    
+    // Calculate due date (1st of next month)
+    const dueDate = new Date(now);
+    dueDate.setMonth(dueDate.getMonth() + 1);
+    dueDate.setDate(1);
+    
     // Create payment
     const payment = await Payment.create({
       ...req.body,
       user: bookingDoc.user,
       hostel: bookingDoc.hostel,
+      month: month,
       rentAmount: bookingDoc.rentAmount,
-      dueDate: new Date(), // This should be calculated based on billing cycle
+      dueDate: dueDate,
       totalAmount: amount,
       amountPaid: amount,
+      paymentDate: new Date(),
       createdBy: req.user.id
     });
     

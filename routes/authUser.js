@@ -9,12 +9,13 @@ const {
   resetPassword,
   addFavorite,
   removeFavorite,
+  getUserDashboard
 } = require("../controllers//authControllers");
 const { protect } = require("../middleware/authMiddleware");
 
 // Auth
 router.post("/register", registerUser);
-router.get("/verify/:token", verifyUser);
+router.get("/verify/:token", verifyUser); 
 router.post("/login", loginUser);
 
 // Profile
@@ -27,5 +28,6 @@ router.post("/reset-password/:token", resetPassword);
 // Favorites
 router.post("/favorites", protect, addFavorite);
 router.delete("/favorites", protect, removeFavorite);
+router.get('/dashboard', protect,getUserDashboard);
 
 module.exports = router;
