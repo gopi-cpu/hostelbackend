@@ -94,8 +94,6 @@ exports.loginUser = async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
 
-    if (!user.isVerified) return res.status(403).json({ message: "Verify your account first" });
-
     res.json({
       _id: user._id,
       name: user.name,
