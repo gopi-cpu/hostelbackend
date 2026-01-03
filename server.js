@@ -18,6 +18,8 @@ const userRoutes = require("./routes/authUser");
 const hostels = require('./routes/hostelroute');
 const payments = require('./routes/paymentroutes')
 const Reviews = require('./routes/reviewroute')
+const students = require('./routes/students')
+
 dotenv.config();    
 
 
@@ -65,6 +67,7 @@ app.use(cors());
 
 // // Routes
 app.use("/api/auth", userRoutes);
+app.use('/api/students', students);
 app.use('/api/hostels', hostels);
 app.use('/api/:hostelId/reviews', require('./routes/reviewroute'));
 app.use('/api/booking',Bookings)

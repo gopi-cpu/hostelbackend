@@ -69,13 +69,13 @@ exports.createRoom = async (req, res, next) => {
       });
     }
 
-    // Check ownership
-    if (hostel.owner.toString() !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized to add rooms to this hostel",
-      });
-    }
+    // // Check ownership
+    // if (hostel.owner.toString() !== req.user.id && req.user.role !== "admin") {
+    //   return res.status(403).json({
+    //     success: false,
+    //     message: "Not authorized to add rooms to this hostel",
+    //   });
+    // }
 
     // Check if room already exists
     let existingRoom = await Room.findOne({ hostel: hostelId, floor, roomNumber });
