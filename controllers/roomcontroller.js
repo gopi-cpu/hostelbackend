@@ -56,11 +56,13 @@ exports.getRoom = async (req, res, next) => {
 // @desc    Create room
 // @route   POST /api/v1/hostels/:hostelId/rooms
 // @access  Private
-exports.createRoom = async (req, res, next) => {
+exports.createRoom = async (req, res) => {
   try {
     const { hostelId, floor, roomNumber, beds, ...roomData } = req.body;
 
-    // Check if hostel exists
+    console.log("Rooms API called:", hostelId, floor, roomNumber, beds);
+    console.log('hostelid',hostelId)
+    // 1️⃣ Validate hostel
     const hostel = await Hostel.findById(hostelId);
     if (!hostel) {
       return res.status(404).json({
@@ -69,31 +71,54 @@ exports.createRoom = async (req, res, next) => {
       });
     }
 
-    // // Check ownership
-    // if (hostel.owner.toString() !== req.user.id && req.user.role !== "admin") {
-    //   return res.status(403).json({
-    //     success: false,
-    //     message: "Not authorized to add rooms to this hostel",
-    //   });
-    // }
+    // 2️⃣ Normalize beds (IMPORTANT FIX)
+    let normalizedBeds = [];
 
-    // Check if room already exists
-    let existingRoom = await Room.findOne({ hostel: hostelId, floor, roomNumber });
+    if (Array.isArray(beds)) {
+      normalizedBeds = beds;
+    } else if (beds && typeof beds === "object") {
+      normalizedBeds = [beds];
+    }
 
+    if (!normalizedBeds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one bed is required",
+      });
+    }
+
+    // 3️⃣ Check if room exists
+    let existingRoom = await Room.findOne({
+      hostel: hostelId,
+      floor,
+      roomNumber,
+    });
+
+    // ===============================
+    // 🟢 CASE 1: ROOM ALREADY EXISTS
+    // ===============================
     if (existingRoom) {
-      // ✅ Room exists → check for bed duplicates
-      const existingBedNumbers = existingRoom.beds.map((b) => b.bedNumber);
+      // Extract existing bed numbers
+      const existingBedNumbers = existingRoom.beds.map(
+        (bed) => bed.bedNumber
+      );
 
-      const duplicateBeds = beds.filter((b) => existingBedNumbers.includes(b.bedNumber));
+      // Check for duplicate beds
+      const duplicateBeds = normalizedBeds.filter((bed) =>
+        existingBedNumbers.includes(bed.bedNumber)
+      );
+
       if (duplicateBeds.length > 0) {
         return res.status(400).json({
           success: false,
-          message: `Bed(s) ${duplicateBeds.map((b) => b.bedNumber).join(", ")} already exist in room ${roomNumber}`,
+          message: `Bed(s) ${duplicateBeds
+            .map((b) => b.bedNumber)
+            .join(", ")} already exist in room ${roomNumber}`,
         });
       }
 
-      // ✅ Add new beds to existing room
-      existingRoom.beds.push(...beds);
+      // Add new beds
+      existingRoom.beds.push(...normalizedBeds);
       await existingRoom.save();
 
       return res.status(200).json({
@@ -101,37 +126,45 @@ exports.createRoom = async (req, res, next) => {
         message: "Beds added to existing room",
         data: existingRoom,
       });
-    } else {
-      // ✅ No existing room → create new
-      const newRoom = await Room.create({
-        hostel: hostelId,
-        floor,
-        roomNumber,
-        beds,
-        ...roomData,
-      });
-
-      return res.status(201).json({
-        success: true,
-        message: "Room created successfully",
-        data: newRoom,
-      });
     }
+
+    // ===============================
+    // 🟢 CASE 2: NEW ROOM
+    // ===============================
+    const newRoom = await Room.create({
+      hostel: hostelId,
+      floor,
+      roomNumber,
+      beds: normalizedBeds,
+      ...roomData,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Room created successfully",
+      data: newRoom,
+    });
   } catch (error) {
+    console.error("Create room error:", error);
+
     if (error.name === "ValidationError") {
-      const messages = Object.values(error.errors).map((val) => val.message);
+      const messages = Object.values(error.errors).map(
+        (val) => val.message
+      );
+
       return res.status(400).json({
         success: false,
         message: messages.join(", "),
       });
-    } else {
-      res.status(500).json({
-        success: false,
-        message: "Server Error",
-      });
     }
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
+
 
 
 // @desc    Update room

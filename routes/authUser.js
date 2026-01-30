@@ -9,7 +9,8 @@ const {
   resetPassword,
   addFavorite,
   removeFavorite,
-  getUserDashboard
+  getUserDashboard,
+  getProfileWithHostels
 } = require("../controllers//authControllers");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -20,6 +21,7 @@ router.post("/login", loginUser);
 
 // Profile
 router.get("/profile", protect, getProfile);
+router.get('/profile/hostel',protect,getProfileWithHostels)
 
 // Password Reset
 router.post("/forgot-password", forgotPassword);

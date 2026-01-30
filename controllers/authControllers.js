@@ -106,11 +106,12 @@ exports.loginUser = async (req, res) => {
   }
 };
 
-
+    
 // @desc Get Profile
 exports.getProfile = async (req, res) => {
   try {
     // ✅ Get token from header (Authorization: Bearer <token>)
+    console.log('profile')
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "No token provided" });
@@ -138,6 +139,44 @@ exports.getProfile = async (req, res) => {
   }
 };
 
+exports.getProfileWithHostels = async (req, res) => {
+  try {
+    // 1️⃣ Get token
+    console.log('profile with header')
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "No token provided" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    // 2️⃣ Verify token
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || "secret123");
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+
+    // 3️⃣ Get user
+    const user = await User.findById(decoded.id).select("-password");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // 4️⃣ Get hostels owned by this user
+    const hostel = await Hostel.findOne({ owner: user._id });
+
+    // 5️⃣ Final response
+    res.status(200).json({
+      user,
+      hostel,
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
 // @desc Forgot Password
 exports.forgotPassword = async (req, res) => {
