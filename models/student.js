@@ -1,3 +1,4 @@
+// models/Student.js
 const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema({
@@ -25,6 +26,11 @@ const studentSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true
+  },
+  hostelId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Hostel',
+    required: true // Add this field
   },
   emergencyContact: {
     name: String,
