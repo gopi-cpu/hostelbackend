@@ -12,7 +12,7 @@ const {
   checkOut,
   cancelBooking,
   getBookingStats
-} = require('../controllers/bookingController');
+} = require('../controllers/bookingcontroller');
 
 const { protect, authorize } = require('../middleware/authMiddleware');
 
