@@ -3,7 +3,7 @@ const router = express.Router();
 const Student = require("../models/student");
 const User = require("../models/authUser");  // Fixed: Use correct import
 const Booking = require("../models/bookingschema");
-
+const Room = require('../models/roomSchema')
 // =======================
 // 📋 Get all students
 // GET /api/students?hostelId=xxx
@@ -87,7 +87,7 @@ router.get("/search", async (req, res) => {
 // =======================
 // ➕ Add new student (Admin creates student)
 // POST /api/students
-// Cases handled:
+// Cases handled: 
 // 1. New user + New student (createUserAccount=true)
 // 2. Existing user + New student (link to existing user)
 // 3. Just student record (no login)
@@ -99,15 +99,13 @@ router.post('/', async (req, res) => {
       email,
       phone,
       room,           // Room ObjectId
-      roomNumber,     // Room number string (e.g., "101")
-      bedId,          // Bed ObjectId
-      bedNumber,      // Bed number string (e.g., "A", "1")
+      roomNumber,     // Room number string
+      bedNumber,      // Bed number string
       studentId,
       hostelId,
       emergencyContact,
       createUserAccount = false,
       password,
-      sendCredentials = false,
       dateOfBirth,
       gender,
       address,
@@ -118,7 +116,9 @@ router.post('/', async (req, res) => {
 
     console.log('Creating student:', { name, email, studentId, hostelId, roomNumber, bedNumber });
 
-    // Validate required fields
+    // ===============================
+    // 1️⃣ Validate required fields
+    // ===============================
     if (!name || !email || !phone || !studentId || !hostelId) {
       return res.status(400).json({
         success: false,
@@ -126,134 +126,100 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Check if student already exists in THIS hostel
-    const existingStudentInHostel = await Student.findOne({
-      studentId,
-      hostelId
-    });
+    // ===============================
+    // 2️⃣ Check duplicate student in same hostel
+    // ===============================
+    const existingStudent = await Student.findOne({ studentId, hostelId });
 
-    if (existingStudentInHostel) {
+    if (existingStudent) {
       return res.status(400).json({
         success: false,
         message: `Student with ID ${studentId} already exists in this hostel`
       });
     }
 
-    // If room is provided, validate it exists and has available beds
-    let assignedRoomId = room || null;
-    let assignedRoomNumber = roomNumber || null;
-    let assignedBedId = bedId || null;
-    let assignedBedNumber = bedNumber || null;
+    // ===============================
+    // 3️⃣ Room + Bed Assignment
+    // ===============================
+    let assignedRoomId = null;
+    let assignedRoomNumber = null;
+    let assignedBedNumber = null;
 
     if (room || roomNumber) {
-      // Find room by ID or roomNumber
-      let roomQuery = { hostelId };
-      
-      if (room && /^[0-9a-fA-F]{24}$/.test(room)) {
+
+      let roomQuery = { hostel: hostelId };
+
+      if (room) {
         roomQuery._id = room;
       } else if (roomNumber) {
         roomQuery.roomNumber = roomNumber;
-      } else {
-        roomQuery._id = room;
       }
 
       const foundRoom = await Room.findOne(roomQuery);
-      
+
       if (!foundRoom) {
         return res.status(400).json({
           success: false,
-          message: `Room ${roomNumber || room} not found in this hostel`
+          message: "Room not found"
         });
       }
 
       assignedRoomId = foundRoom._id;
       assignedRoomNumber = foundRoom.roomNumber;
 
-      // Check if specific bed is requested
-      if (bedId || bedNumber) {
-        const bedQuery = { roomId: foundRoom._id };
-        
-        if (bedId && /^[0-9a-fA-F]{24}$/.test(bedId)) {
-          bedQuery._id = bedId;
-        } else if (bedNumber) {
-          bedQuery.bedNumber = bedNumber;
-        } else {
-          bedQuery._id = bedId;
-        }
+      // If bed is provided
+      if (bedNumber) {
 
-        const foundBed = await Bed.findOne(bedQuery);
+        const foundBed = foundRoom.beds.find(
+          bed => bed.bedNumber === bedNumber
+        );
 
         if (!foundBed) {
           return res.status(400).json({
             success: false,
-            message: `Bed ${bedNumber || bedId} not found in room ${foundRoom.roomNumber}`
+            message: `Bed ${bedNumber} not found in room ${foundRoom.roomNumber}`
           });
         }
 
         if (foundBed.isOccupied) {
           return res.status(400).json({
             success: false,
-            message: `Bed ${foundBed.bedNumber} is already occupied`
+            message: `Bed ${bedNumber} is already occupied`
           });
         }
 
-        // Mark bed as occupied
+        // Mark bed occupied
         foundBed.isOccupied = true;
-        foundBed.checkInDate = new Date();
-        await foundBed.save();
+        foundBed.status = "occupied";
 
-        assignedBedId = foundBed._id;
         assignedBedNumber = foundBed.bedNumber;
+
+        await foundRoom.save();
       }
     }
 
+    // ===============================
+    // 4️⃣ Handle User Account Creation
+    // ===============================
     let userId = null;
     let userCreated = false;
     let isExistingUser = false;
 
-    // Handle user account creation/linking
     if (createUserAccount) {
-      const existingUser = await User.findOne({ email: email.toLowerCase() });
-      
+
+      const existingUser = await User.findOne({
+        email: email.toLowerCase()
+      });
+
       if (existingUser) {
         userId = existingUser._id;
         isExistingUser = true;
-        
-        const existingLink = await Student.findOne({
-          userId: existingUser._id,
-          hostelId,
-          status: 'active'
-        });
-
-        if (existingLink) {
-          // Rollback bed assignment if user already linked
-          if (assignedBedId) {
-            await Bed.findByIdAndUpdate(assignedBedId, {
-              isOccupied: false,
-              occupiedBy: null,
-              checkInDate: null
-            });
-          }
-          
-          return res.status(400).json({
-            success: false,
-            message: 'This user is already an active student in this hostel'
-          });
-        }
       } else {
-        if (!password) {
-          // Rollback bed assignment if validation fails
-          if (assignedBedId) {
-            await Bed.findByIdAndUpdate(assignedBedId, {
-              isOccupied: false,
-              occupiedBy: null,
-              checkInDate: null
-            });
-          }
 
+        if (!password) {
           return res.status(400).json({
             success: false,
-            message: 'Password is required to create user account'
+            message: "Password is required to create user account"
           });
         }
 
@@ -261,25 +227,27 @@ router.post('/', async (req, res) => {
           name,
           email: email.toLowerCase(),
           phone,
-          password, // Make sure to hash this in User model pre-save
+          password,
           role: 'student',
           isVerified: true
         });
 
         await newUser.save();
+
         userId = newUser._id;
         userCreated = true;
       }
     }
 
-    // Create student record with room and bed info
+    // ===============================
+    // 5️⃣ Create Student Record
+    // ===============================
     const student = new Student({
       name,
       email: email.toLowerCase(),
       phone,
       room: assignedRoomId,
       roomNumber: assignedRoomNumber,
-      bedId: assignedBedId,
       bedNumber: assignedBedNumber,
       studentId,
       hostelId,
@@ -293,68 +261,41 @@ router.post('/', async (req, res) => {
       hasLoginAccess: !!userId,
       status: 'active',
       source,
-      createdBy: userId ? 'admin' : 'admin',
+      createdBy: 'admin',
       checkInDate: assignedRoomId ? new Date() : null
     });
 
     await student.save();
 
-    // Update bed with student reference
-    if (assignedBedId) {
-      await Bed.findByIdAndUpdate(assignedBedId, {
-        occupiedBy: student._id,
-        studentName: name,
-        studentEmail: email
-      });
-    }
-
-    // If linked to user, add student reference to user's profile
+    // Link student profile to user
     if (userId) {
       await User.findByIdAndUpdate(userId, {
         $addToSet: { studentProfiles: student._id }
       });
     }
 
+    // ===============================
+    // 6️⃣ Final Response
+    // ===============================
     res.status(201).json({
       success: true,
-      message: userCreated 
-        ? 'Student and new user account created successfully' 
-        : isExistingUser 
-          ? 'Student linked to existing user account' 
+      message: userCreated
+        ? 'Student and new user account created successfully'
+        : isExistingUser
+          ? 'Student linked to existing user account'
           : 'Student record created (no login)',
       student: await Student.findById(student._id)
         .populate('userId', 'name email')
-        .populate('hostelId', 'name')
         .populate('room', 'roomNumber floor')
     });
 
   } catch (error) {
     console.error('Create student error:', error);
-    
-    // Attempt to rollback bed assignment on error
-    if (req.body.bedId || req.body.bedNumber) {
-      try {
-        const bed = await Bed.findOne({
-          $or: [
-            { _id: req.body.bedId },
-            { bedNumber: req.body.bedNumber, roomId: req.body.room }
-          ]
-        });
-        if (bed) {
-          bed.isOccupied = false;
-          bed.occupiedBy = null;
-          bed.checkInDate = null;
-          await bed.save();
-        }
-      } catch (rollbackError) {
-        console.error('Rollback error:', rollbackError);
-      }
-    }
 
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: 'Duplicate entry: Student ID already exists in this hostel or email conflict',
+        message: 'Duplicate entry error',
         error: error.message
       });
     }
@@ -366,6 +307,7 @@ router.post('/', async (req, res) => {
     });
   }
 });
+
 // =======================
 // 👤 Get student by ID
 // GET /api/students/:id

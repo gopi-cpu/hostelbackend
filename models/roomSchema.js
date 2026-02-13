@@ -22,12 +22,7 @@ const bedSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
-  amenities: [String],
-  status: {
-    type: String,
-    enum: ['available', 'occupied', 'maintenance', 'reserved'],
-    default: 'available'
-  }
+  amenities: [String]
 });
 
 const roomSchema = new mongoose.Schema({
