@@ -9,6 +9,11 @@ const bedSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  status: {
+    type: String,
+    enum: ['available', 'occupied', 'maintenance', 'reserved'],
+    default: 'available'
+  },
   currentOccupant: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'

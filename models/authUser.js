@@ -1,4 +1,4 @@
-// models/User.js
+// models/User.js (or authUser.js - be consistent!)
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
@@ -11,9 +11,10 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true,
+    unique: true,  // Email is globally unique for login
     lowercase: true,
-    trim: true
+    trim: true,
+    index: true
   },
   password: {
     type: String,
@@ -28,17 +29,33 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  role: {
+    type: String,
+    enum: ['student', 'admin', 'owner', 'staff'],
+    default: 'student'
+  },
   isVerified: {
     type: Boolean,
     default: false
   },
-  verificationToken: String,  
+  verificationToken: String,
   resetPasswordToken: String,
   resetPasswordExpires: Date,
+  // Track all hostels this user is associated with (as student)
+  studentProfiles: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Student'
+  }],
+  // Track bookings made by this user
+  bookings: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Booking'
+  }],
   favorites: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Hostel'
   }],
+  lastLogin: Date,
   createdAt: {
     type: Date,
     default: Date.now
@@ -52,7 +69,6 @@ userSchema.pre('save', async function(next) {
   next();
 });
 
-// Compare password method
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
