@@ -38,4 +38,6 @@ router
   .route('/:id/beds/:bedNumber/vacate')
   .put(protect, authorize('owner', 'admin'), vacateBed);
 
+  
+
 module.exports = router;

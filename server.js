@@ -11,7 +11,7 @@ const cors = require('cors');
 const Bookings = require('./routes/bookingroute');
 // const fileUpload = require('express-fileupload');
 const Rooms = require('./routes/roomroute');
-
+const bedRoutes = require('./routes/bedroutes')
 const connectDB = require("./database/db");
 const userRoutes = require("./routes/authUser");
 // const userRoutes = require("./routes/userRoutes");
@@ -74,6 +74,10 @@ app.use('/api/booking',Bookings)
 app.use('/api/rooms', Rooms);
 app.use('/api/reviews',Reviews)
 app.use('/api/payments',payments)
+// Mount routes
+app.use('/api/rooms/:roomId/beds', bedRoutes);
+app.use('/api/v1/hostels/:hostelId/beds', bedRoutes);
+
 
 app.get('/',(req,res)=>{
   res.send('running')

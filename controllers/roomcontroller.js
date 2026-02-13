@@ -30,6 +30,7 @@ exports.getRooms = async (req, res, next) => {
 // @access  Public
 exports.getRoom = async (req, res, next) => {
   try {
+    console.log('getroom')
     const room = await Room.findById(req.params.id)
       .populate('hostel', 'name address contact')
       .populate('beds.currentOccupant', 'name email phone');
@@ -255,6 +256,7 @@ exports.deleteRoom = async (req, res, next) => {
 // @route   PUT /api/v1/rooms/:id/beds/:bedNumber/assign
 // @access  Private
 exports.assignBed = async (req, res, next) => {
+  console.log('assing bed')
   try {
     const { id, bedNumber } = req.params;
     const { userId, checkInDate } = req.body;
@@ -365,3 +367,4 @@ exports.vacateBed = async (req, res, next) => {
     });
   }
 };
+
