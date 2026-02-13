@@ -17,7 +17,7 @@ const {
   assignBed,
   vacateBed,
   getBedHistory
-} = require('../controllers/bedController');
+} = require('../controllers/bedcontroller');
 
 const { protect, authorize } = require('../middleware/authMiddleware');
 
