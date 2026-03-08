@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const ngeohash = require("ngeohash");
 
 const propertySchema = new mongoose.Schema({
   // Basic Info
@@ -70,6 +71,10 @@ const propertySchema = new mongoose.Schema({
     landmarks: [{ type: String }],
     distanceFromCityCenter: Number
   },
+  geohash: {
+  type: String,
+  index: true
+},
 
   // Contact Info
   contact: {
@@ -381,6 +386,7 @@ propertySchema.index({ 'availability.availableUnits': 1 });
 propertySchema.index({ 'featured.isFeatured': 1, 'featured.featurePriority': -1 });
 propertySchema.index({ tags: 1 });
 propertySchema.index({ amenities: 1 });
+propertySchema.index({ geohash: 1, status: 1 });
 
 // Virtual for full address
 propertySchema.virtual('fullAddress').get(function() {
@@ -400,12 +406,17 @@ propertySchema.pre('save', function(next) {
   else if (rent < 25000) this.pricing.priceCategory = 'premium';
   else this.pricing.priceCategory = 'luxury';
 
-    if (this.location?.coordinates?.coordinates) {
-    const lng = this.location.coordinates.coordinates[0];
-    const lat = this.location.coordinates.coordinates[1];
+  if (
+  this.location &&
+  this.location.coordinates &&
+  Array.isArray(this.location.coordinates.coordinates)
+) {
+  const [lng, lat] = this.location.coordinates.coordinates;
+
+  if (lat && lng) {
     this.geohash = ngeohash.encode(lat, lng, 6);
   }
-
+}
   // Set full address
   if (this.location?.address) {
     this.location.address.fullAddress = this.fullAddress;

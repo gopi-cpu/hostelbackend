@@ -248,6 +248,44 @@ function extractLocationFromGoogleResult(result) {
   };
 }
 
+async function getRoadDistance(originLat, originLng, destLat, destLng) {
+  try {
+
+    const apiKey = process.env.GEOCODER_API_KEY;
+
+    const url =
+      `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originLat},${originLng}&destinations=${destLat},${destLng}&key=${apiKey}`;
+
+    const response = await axios.get(url);
+
+    console.log("Distance API response:", response.data);
+
+    if (
+      response.data &&
+      response.data.rows &&
+      response.data.rows[0] &&
+      response.data.rows[0].elements &&
+      response.data.rows[0].elements[0]
+    ) {
+      const element = response.data.rows[0].elements[0];
+
+      if (element.status === "OK") {
+        return {
+          distanceMeters: element.distance.value,
+          distanceText: element.distance.text,
+          durationText: element.duration.text
+        };
+      }
+    }
+
+    return null;
+
+  } catch (err) {
+    console.error("Distance API error:", err.message);
+    return null;
+  }
+}
+
 
 // Main controller
 exports.getNearbyAreas = async (req, res) => {
@@ -509,8 +547,26 @@ exports.getNearbyAreas = async (req, res) => {
 
     console.log(`✅ Found ${properties.length} properties`);
 
-    // Format response
-    const formattedProperties = properties.map(pg => ({
+    const formattedProperties = await Promise.all(
+  properties.map(async (pg) => {
+
+    let roadDistance = null;
+
+    if (lat && lng && pg.location?.coordinates?.coordinates) {
+      const [destLng, destLat] = pg.location.coordinates.coordinates;
+
+      roadDistance = await getRoadDistance(
+        lat,
+        lng,
+        destLat,
+        destLng
+      );
+    }
+
+    const distanceMeters = roadDistance?.distanceMeters || pg.distanceMeters;
+    const distanceKm = distanceMeters / 1000;
+
+    return {
       _id: pg._id,
       name: pg.name,
       displayName: pg.displayName,
@@ -527,17 +583,27 @@ exports.getNearbyAreas = async (req, res) => {
       amenities: pg.amenities?.slice(0, 5) || [],
       foodProvided: pg.food?.provided || false,
       foodType: pg.food?.type || null,
-      distance: pg.distance,
-      distanceKm: pg.distanceKm,
-      distanceMeters: pg.distanceMeters,
-      distanceDisplay: pg.distanceDisplay,
-      etaMinutes: pg.etaMinutes,
-      etaDisplay: pg.etaMinutes <= 5 ? '5 min' : 
-                  pg.etaMinutes < 60 ? `${pg.etaMinutes} min` : 
-                  `${Math.round(pg.etaMinutes/60)} hr`,
-      areaName: pg.areaDetails?.displayName || pg.location?.address?.area
-    }));
 
+      distance: distanceMeters,
+      distanceKm: parseFloat(distanceKm.toFixed(2)),
+      distanceMeters: distanceMeters,
+      distanceDisplay: roadDistance?.distanceText || pg.distanceDisplay,
+
+      etaDisplay: roadDistance?.durationText || (
+        pg.etaMinutes <= 5
+          ? '5 min'
+          : pg.etaMinutes < 60
+          ? `${pg.etaMinutes} min`
+          : `${Math.round(pg.etaMinutes / 60)} hr`
+      ),
+
+      areaName: pg.areaDetails?.displayName || pg.location?.address?.area
+    };
+
+  })
+);
+
+formattedProperties.sort((a, b) => a.distanceMeters - b.distanceMeters);
     // Group by distance for UI
     const groupedByDistance = {
       veryNear: formattedProperties.filter(p => p.distanceMeters <= 500),

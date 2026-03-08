@@ -29,6 +29,6 @@ router.get('/popular-cities', getPopularCities);
 // Admin only routes
 router.post('/states', protect, authorize('admin'), createState);
 router.post('/cities', protect, authorize('admin'), createCity);
-router.post('/areas', protect, authorize('admin'), createArea);
+router.post('/areas', createArea);
 
 module.exports = router;
