@@ -6,10 +6,10 @@ const Hostel = require('../models/hostelschema');
 // @access  Public
 exports.getRooms = async (req, res, next) => {
   try {
-    const { hostelId } = req.params;
-
-    console.log(hostelId)
-    const rooms = await Room.find({ hostel: hostelId })
+    const { roomId } = req.params;
+    console.log('rooms api',roomId)
+    console.log(roomId)
+    const rooms = await Room.find({ hostel: roomId })
       .populate('beds.currentOccupant', 'name email phone');
     
     res.status(200).json({
@@ -30,26 +30,48 @@ exports.getRooms = async (req, res, next) => {
 // @access  Public
 exports.getRoom = async (req, res, next) => {
   try {
-    console.log('getroom')
-    const room = await Room.findById(req.params.id)
-      .populate('hostel', 'name address contact')
-      .populate('beds.currentOccupant', 'name email phone');
-    
+    console.log('🔍 getRoom called with ID:', req.params.roomId);
+
+    const room = await Room.findById(req.params.roomId)
+      .populate('hostel', 'name address contact phone email')
+      .populate({
+        path: 'currentOccupants', // Try this instead of beds.currentOccupant
+        select: 'name email phone profileImage',
+        strictPopulate: false
+      });
+
+    console.log('📋 Room query result:', room ? 'Found' : 'Not Found');
+
     if (!room) {
       return res.status(404).json({
         success: false,
         message: 'Room not found'
       });
     }
-    
+
+    // Log the room structure for debugging
+    console.log('🏠 Room data:', {
+      id: room._id,
+      roomNumber: room.roomNumber,
+      hasHostel: !!room.hostel,
+      hostelId: room.hostel?._id,
+      bedsCount: room.beds?.length || 0,
+      currentOccupantsCount: room.currentOccupants?.length || 0
+    });
+
     res.status(200).json({
       success: true,
       data: room
     });
+
   } catch (error) {
+    console.error('❌ getRoom Error:', error.message);
+    console.error('Stack:', error.stack);
+
     res.status(500).json({
       success: false,
-      message: 'Server Error'
+      message: 'Failed to load room details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

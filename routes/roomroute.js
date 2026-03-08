@@ -21,13 +21,13 @@ router
   .post(protect, authorize('owner', 'admin'), createRoom);
 
 router
-  .route('/:id')
+  .route('/:roomId')
   .get(getRoom)
   .put(protect, authorize('owner', 'admin'), updateRoom)
   .delete(protect, authorize('owner', 'admin'), deleteRoom);
 
 router
-  .route('/:hostelId/rooms')
+  .route('/:roomId/rooms')
   .get(getRooms);
 
 router

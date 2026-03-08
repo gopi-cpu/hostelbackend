@@ -36,7 +36,7 @@ const roomSchema = new mongoose.Schema({
   },
   hostel: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Hostel',
+    ref: 'Property',
     required: true
   },
   roomType: {

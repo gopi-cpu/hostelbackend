@@ -1,3 +1,5 @@
+
+
 // const express = require('express');
 // const {
 //   getHostels,
@@ -5,73 +7,69 @@
 //   createHostel,
 //   updateHostel,
 //   deleteHostel,
-//   uploadHostelImages,
 //   deleteHostelImage,
 //   getHostelsInRadius
-// } = require('../controllers/hostelController');
-
-// const { protect, checkHostelOwnership } = require('../middleware/authMiddleware');
-
-// // Include other resource routers
-
+// } = require('../controllers/hostelcontroller');
 
 // const router = express.Router();
 
-// router.route('/radius/:zipcode/:distance').get(getHostelsInRadius);
+// // Include other resource routers
+// const reviewRouter = require('../controllers/reviewcontroller');
+
+// // // Re-route into other resource routers
+// // router.use('/:hostelId/reviews', reviewRouter);
 
 // router
 //   .route('/')
 //   .get(getHostels)
-//   .post(protect, createHostel);
+//   .post(createHostel);
 
 // router
 //   .route('/:id')
 //   .get(getHostel)
-//   .put(protect, checkHostelOwnership, updateHostel)
-//   .delete(protect, checkHostelOwnership, deleteHostel);
+//   .put(updateHostel)
+//   .delete(deleteHostel);
 
-// // router.route('/:id/images').put(protect, checkHostelOwnership, uploadHostelImages);
+// router
+//   .route('/:id/images/:imageId')
+//   .delete(deleteHostelImage);
 
-// router.route('/:id/images/:imageId').delete(protect, checkHostelOwnership, deleteHostelImage);
+// router
+//   .route('/radius/:zipcode/:distance')
+//   .get(getHostelsInRadius);
 
 // module.exports = router;
 
 const express = require('express');
+const router = express.Router();
+const { protect, authorize } = require('../middleware/authMiddleware');
 const {
-  getHostels,
-  getHostel,
-  createHostel,
-  updateHostel,
-  deleteHostel,
-  deleteHostelImage,
-  getHostelsInRadius
+  getProperties,
+  getProperty,
+  createProperty,
+  updateProperty,
+  deleteProperty,
+  getNearbyProperties,
+  searchProperties,
+  getFeaturedProperties,
+  getPropertiesByArea,
+  getNearbyAreas,
+  getAreasByCity 
 } = require('../controllers/hostelcontroller');
 
-const router = express.Router();
+// Public routes
+router.get('/', getProperties);
+router.get('/areas', getAreasByCity);
+router.get('/area/:areaName', getPropertiesByArea); 
+router.get('/nearby-areas', getNearbyAreas);  
+router.get('/nearby', getNearbyProperties);
+router.get('/search', searchProperties);
+router.get('/featured', getFeaturedProperties);
+router.get('/:id', getProperty);
 
-// Include other resource routers
-const reviewRouter = require('../controllers/reviewcontroller');
-
-// // Re-route into other resource routers
-// router.use('/:hostelId/reviews', reviewRouter);
-
-router
-  .route('/')
-  .get(getHostels)
-  .post(createHostel);
-
-router
-  .route('/:id')
-  .get(getHostel)
-  .put(updateHostel)
-  .delete(deleteHostel);
-
-router
-  .route('/:id/images/:imageId')
-  .delete(deleteHostelImage);
-
-router
-  .route('/radius/:zipcode/:distance')
-  .get(getHostelsInRadius);
+// Protected routes
+router.post('/', protect, createProperty);
+router.put('/:id', protect, updateProperty);
+router.delete('/:id', protect, deleteProperty);
 
 module.exports = router;
