@@ -1,4 +1,4 @@
-const State = require('../models/State');
+const State = require('../models/state');
 const City = require('../models/City');
 const Area = require('../models/Area');
 const Property = require('../models/hostelschema');
