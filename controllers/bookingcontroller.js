@@ -1,8 +1,8 @@
 // controllers/bookingController.js
 const Booking = require('../models/bookingschema');
 const Room = require('../models/roomSchema');
-const Hostel = require('../models/hostelschema');
-const Student = require('../models/bookingschema');
+const Property  = require('../models/hostelschema');
+const Student = require('../models/student');
 const User = require('../models/authUser');
 const mongoose = require('mongoose');
 
@@ -25,7 +25,7 @@ exports.getBookings = async (req, res) => {
       query.user = req.user.id;
     } else if (req.user.role === 'owner') {
       // Owners see bookings for their hostels
-      const ownerHostels = await Hostel.find({ owner: req.user.id }).select('_id');
+      const ownerHostels = await Property.find({ owner: req.user.id }).select('_id');
       const hostelIds = ownerHostels.map(h => h._id);
       query.hostel = { $in: hostelIds };
     }
@@ -120,7 +120,7 @@ exports.createBooking = async (req, res) => {
       emergencyContact,
       documents
     } = req.body;
-
+    console.log('booking details',hostel,room,bed,checkInDate,durationMonths,emergencyContact,documents)
     // Validate required fields
     if (!hostel || !room || !bed || !checkInDate || !durationMonths || !emergencyContact) {
       return res.status(400).json({
@@ -217,7 +217,10 @@ exports.createBooking = async (req, res) => {
     });
 
   } catch (error) {
+     if (session.inTransaction()) {
     await session.abortTransaction();
+  }
+
     console.error('Create booking error:', error);
     
     if (error.name === 'ValidationError') {
@@ -344,7 +347,7 @@ exports.confirmBooking = async (req, res) => {
     }
 
     // Verify ownership
-    const hostel = await Hostel.findById(booking.hostel);
+    const hostel = await Property.findById(booking.hostel);
     if (hostel.owner.toString() !== req.user.id && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -398,7 +401,7 @@ exports.checkIn = async (req, res) => {
     }
 
     // Verify authorization
-    const hostel = await Hostel.findById(booking.hostel).session(session);
+    const hostel = await Property.findById(booking.hostel).session(session);
     if (hostel.owner.toString() !== req.user.id && req.user.role !== 'admin') {
       await session.abortTransaction();
       return res.status(403).json({
@@ -484,7 +487,7 @@ exports.checkOut = async (req, res) => {
     }
 
     // Verify authorization
-    const hostel = await Hostel.findById(booking.hostel).session(session);
+    const hostel = await Property.findById(booking.hostel).session(session);
     if (hostel.owner.toString() !== req.user.id && req.user.role !== 'admin') {
       await session.abortTransaction();
       return res.status(403).json({
@@ -566,7 +569,7 @@ exports.cancelBooking = async (req, res) => {
     }
 
     // Authorization
-    const isOwner = await Hostel.exists({ _id: booking.hostel, owner: req.user.id });
+    const isOwner = await Property.exists({ _id: booking.hostel, owner: req.user.id });
     const isAdmin = req.user.role === 'admin';
     const isUser = booking.user.toString() === req.user.id;
 
@@ -660,7 +663,7 @@ exports.getBookingStats = async (req, res) => {
     let matchStage = {};
     
     if (req.user.role === 'owner') {
-      const hostels = await Hostel.find({ owner: req.user.id }).select('_id');
+      const hostels = await Property.find({ owner: req.user.id }).select('_id');
       matchStage.hostel = { $in: hostels.map(h => h._id) };
     }
 

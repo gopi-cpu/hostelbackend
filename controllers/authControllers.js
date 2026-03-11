@@ -262,6 +262,7 @@ exports.removeFavorite = async (req, res) => {
 exports.getUserDashboard = async (req, res, next) => {
   try {
     // Get user's current booking (active booking)
+    console.log('user id',req.user.id)
     const currentBooking = await Booking.findOne({
       user: req.user.id,
       status: { $in: ['confirmed', 'checkedIn'] }

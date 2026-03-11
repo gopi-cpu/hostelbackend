@@ -1,10 +1,10 @@
-// models/Maintenance.js (Enhanced version)
+// models/Maintenance.js (Updated to match React Native frontend)
 const mongoose = require('mongoose');
 
 const maintenanceSchema = new mongoose.Schema({
   hostel: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Hostel',
+    ref: 'Property',
     required: true,
     index: true
   },
@@ -23,41 +23,55 @@ const maintenanceSchema = new mongoose.Schema({
     required: true,
     index: true
   },
-  // Track if raised by student profile
   studentProfile: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Student'
   },
+  
+  // UPDATED: Match React Native CATEGORIES
   category: {
     type: String,
-    enum: ['electrical', 'plumbing', 'carpentry', 'cleaning', 'furniture', 'appliance', 'other'],
+    enum: ['plumbing', 'electrical', 'ac', 'furniture', 'cleaning', 'pest', 'internet', 'other'],
     required: true
   },
+  
+  title: {
+    type: String,
+    required: true,
+    maxlength: 200
+  },
+  
   description: {
     type: String,
     required: true,
     maxlength: 1000
   },
+  
+  // UPDATED: Match React Native PRIORITIES (capitalized)
   priority: {
     type: String,
-    enum: ['low', 'medium', 'high', 'emergency'],
-    default: 'medium'
+    enum: ['Low', 'Medium', 'High', 'Urgent'],
+    default: 'Medium'
   },
+  
   images: [{
     url: String,
     uploadedAt: { type: Date, default: Date.now }
   }],
+  
+  // UPDATED: Match React Native status values
   status: {
     type: String,
-    enum: ['pending', 'in_progress', 'completed', 'cancelled', 'on_hold'],
+    enum: ['pending', 'in-progress', 'resolved', 'closed'],
     default: 'pending',
     index: true
   },
+  
   assignedTo: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
-  // Cost tracking
+  
   estimatedCost: {
     type: Number,
     min: 0
@@ -66,21 +80,22 @@ const maintenanceSchema = new mongoose.Schema({
     type: Number,
     min: 0
   },
-  // Timeline tracking
+  
   scheduledDate: Date,
   startedDate: Date,
   completionDate: Date,
-  // Additional details
+  
   resolution: {
     type: String,
     maxlength: 1000
   },
+  
   materialsUsed: [{
     item: String,
     quantity: Number,
     cost: Number
   }],
-  // Feedback from requester
+  
   feedback: {
     rating: {
       type: Number,
@@ -90,7 +105,7 @@ const maintenanceSchema = new mongoose.Schema({
     comment: String,
     date: Date
   },
-  // Internal notes for staff
+  
   internalNotes: [{
     note: String,
     addedBy: {
@@ -102,7 +117,7 @@ const maintenanceSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-  // Audit trail
+  
   history: [{
     action: String,
     performedBy: {
@@ -119,7 +134,7 @@ const maintenanceSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for common queries
+// Indexes
 maintenanceSchema.index({ hostel: 1, status: 1 });
 maintenanceSchema.index({ hostel: 1, priority: 1 });
 maintenanceSchema.index({ createdAt: -1 });
@@ -132,12 +147,12 @@ maintenanceSchema.virtual('duration').get(function() {
   return null;
 });
 
-// Pre-save middleware to track history
+// Pre-save middleware
 maintenanceSchema.pre('save', function(next) {
   if (this.isModified('status')) {
     this.history.push({
       action: 'status_change',
-      performedBy: this._updatedBy, // Set this in controller
+      performedBy: this._updatedBy,
       details: `Status changed to ${this.status}`
     });
   }

@@ -21,6 +21,7 @@ const Reviews = require('./routes/reviewroute')
 const students = require('./routes/students')
 const locationController = require('./routes/locationRoutes')
 const uploadRoutes  = require('./routes/upload')
+const maintenance  = require('./routes/maintenanceRoutes')
 
 dotenv.config();    
 
@@ -73,7 +74,7 @@ app.use("/api/auth", userRoutes);
 app.use('/api/students', students);
 app.use('/api/properties', hostels);
 app.use('/api/:hostelId/reviews', require('./routes/reviewroute'));
-app.use('/api/booking',Bookings)
+app.use('/api/bookings',Bookings)
 app.use('/api/rooms', Rooms);
 app.use('/api/reviews',Reviews)
 app.use('/api/payments',payments)
@@ -82,7 +83,7 @@ app.use('/api/rooms/:roomId/beds', bedRoutes);
 app.use('/api/v1/hostels/:hostelId/beds', bedRoutes);
 app.use('/api/location',locationController)
 app.use('/api/upload', uploadRoutes);
-
+app.use('/api/maintenance',maintenance)
 
 app.get('/',(req,res)=>{
   res.send('running')

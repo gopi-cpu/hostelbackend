@@ -11,7 +11,7 @@ const bookingSchema = new mongoose.Schema({
   },
   hostel: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Hostel',
+    ref: 'Property',
     required: true,
     index: true
   },
@@ -90,12 +90,11 @@ const bookingSchema = new mongoose.Schema({
   },
 
   // Emergency Contact
-  emergencyContact: {
-    name: { type: String, required: true },
-    relationship: { type: String, required: true },
-    phone: { type: String, required: true }
-  },
-
+ // Emergency Contact
+emergencyContact: {
+  type: String,
+  required: true
+},
   // Documents
   documents: [{
     type: {

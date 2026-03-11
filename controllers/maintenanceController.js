@@ -8,9 +8,13 @@ const asyncHandler = require('express-async-handler');
 // @desc    Create new maintenance request
 // @route   POST /api/maintenance
 // @access  Private (Student/Admin)
+// @desc    Create new maintenance request
+// @route   POST /api/maintenance
+// @access  Private (Student/Admin)
 const createMaintenanceRequest = asyncHandler(async (req, res) => {
-  const { hostelId, room, bed, category, description, priority, images } = req.body;
-
+  const { hostelId, room, bed, category, title, description, priority, images } = req.body;
+  console.log('hostelid', hostelId, req.user._id);
+  
   // Verify hostel exists
   const hostel = await Hostel.findById(hostelId);
   if (!hostel) {
@@ -18,16 +22,24 @@ const createMaintenanceRequest = asyncHandler(async (req, res) => {
     throw new Error('Hostel not found');
   }
 
-  // Check if user is authorized (student of this hostel or admin/owner)
+  // Check if user is authorized
   const isAuthorized = req.user.role === 'admin' || 
                        req.user.role === 'owner' ||
                        req.user.role === 'staff' ||
                        await Student.findOne({ userId: req.user._id, hostelId });
 
   if (!isAuthorized) {
-    res.status(403);
+    res.status(403);  
     throw new Error('Not authorized to create maintenance request for this hostel');
   }
+
+  // Map priority to match schema enum (Capitalized)
+  const priorityMap = {
+    'low': 'Low',
+    'medium': 'Medium', 
+    'high': 'High',
+    'emergency': 'Urgent'
+  };
 
   const maintenance = await Maintenance.create({
     hostel: hostelId,
@@ -35,8 +47,9 @@ const createMaintenanceRequest = asyncHandler(async (req, res) => {
     bed: bed || null,
     raisedBy: req.user._id,
     category,
+    title: title || 'Maintenance Request', // Provide default if missing
     description,
-    priority: priority || 'medium',
+    priority: priorityMap[priority?.toLowerCase()] || 'Medium', // Map to capitalized
     images: images || [],
     status: 'pending'
   });
@@ -51,7 +64,6 @@ const createMaintenanceRequest = asyncHandler(async (req, res) => {
     data: populatedMaintenance
   });
 });
-
 // @desc    Get all maintenance requests for a hostel
 // @route   GET /api/maintenance/hostel/:hostelId
 // @access  Private (Admin/Owner/Staff)
@@ -97,6 +109,7 @@ const getHostelMaintenanceRequests = asyncHandler(async (req, res) => {
 // @route   GET /api/maintenance/my-requests
 // @access  Private
 const getMyMaintenanceRequests = asyncHandler(async (req, res) => {
+  console.log('maintanance log ')
   const requests = await Maintenance.find({ raisedBy: req.user._id })
     .populate('hostel', 'name address')
     .populate('assignedTo', 'name email phone')
@@ -151,12 +164,18 @@ const updateMaintenanceStatus = asyncHandler(async (req, res) => {
     throw new Error('Maintenance request not found');
   }
 
-  // Only admin, owner, or staff can update status
   if (req.user.role !== 'admin' && 
       req.user.role !== 'owner' && 
       req.user.role !== 'staff') {
     res.status(403);
     throw new Error('Not authorized to update maintenance status');
+  }
+
+  // Validate status against schema enum
+  const validStatuses = ['pending', 'in-progress', 'resolved', 'closed'];
+  if (status && !validStatuses.includes(status)) {
+    res.status(400);
+    throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
   }
 
   maintenance.status = status || maintenance.status;
@@ -192,7 +211,6 @@ const assignMaintenanceRequest = asyncHandler(async (req, res) => {
     throw new Error('Maintenance request not found');
   }
 
-  // Verify staff exists and is staff role
   const staff = await User.findById(staffId);
   if (!staff || (staff.role !== 'staff' && staff.role !== 'admin')) {
     res.status(400);
@@ -200,7 +218,7 @@ const assignMaintenanceRequest = asyncHandler(async (req, res) => {
   }
 
   maintenance.assignedTo = staffId;
-  maintenance.status = 'in_progress';
+  maintenance.status = 'in-progress'; // Changed from 'in_progress' to 'in-progress'
   await maintenance.save();
 
   const updatedMaintenance = await Maintenance.findById(maintenance._id)
@@ -227,15 +245,15 @@ const addFeedback = asyncHandler(async (req, res) => {
     throw new Error('Maintenance request not found');
   }
 
-  // Only the user who raised it can add feedback
   if (maintenance.raisedBy.toString() !== req.user._id.toString()) {
     res.status(403);
     throw new Error('Only the requester can add feedback');
   }
 
-  if (maintenance.status !== 'completed') {
+  // Updated to match schema enum values
+  if (maintenance.status !== 'resolved' && maintenance.status !== 'closed') {
     res.status(400);
-    throw new Error('Can only add feedback to completed requests');
+    throw new Error('Can only add feedback to resolved or closed requests');
   }
 
   maintenance.feedback = {
@@ -326,11 +344,9 @@ const deleteMaintenanceRequest = asyncHandler(async (req, res) => {
 const getOwnerDashboard = asyncHandler(async (req, res) => {
   const { status, priority, category, hostelId, startDate, endDate } = req.query;
   
-  // Get all hostels owned by this user
   const hostels = await Hostel.find({ owner: req.user._id });
   const hostelIds = hostels.map(h => h._id);
 
-  // Build filter
   let matchStage = { hostel: { $in: hostelIds } };
   
   if (hostelId && hostels.some(h => h._id.toString() === hostelId)) {
@@ -346,7 +362,6 @@ const getOwnerDashboard = asyncHandler(async (req, res) => {
   }
 
   const [requests, stats] = await Promise.all([
-    // Get requests with pagination
     Maintenance.find(matchStage)
       .populate('raisedBy', 'name email phone')
       .populate('assignedTo', 'name email phone role')
@@ -355,7 +370,6 @@ const getOwnerDashboard = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(50),
 
-    // Get statistics
     Maintenance.aggregate([
       { $match: { hostel: { $in: hostelIds } } },
       {
@@ -363,16 +377,15 @@ const getOwnerDashboard = asyncHandler(async (req, res) => {
           _id: null,
           total: { $sum: 1 },
           pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
-          inProgress: { $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] } },
-          completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
-          emergency: { $sum: { $cond: [{ $eq: ['$priority', 'emergency'] }, 1, 0] } },
-          highPriority: { $sum: { $cond: [{ $eq: ['$priority', 'high'] }, 1, 0] } }
+          inProgress: { $sum: { $cond: [{ $eq: ['$status', 'in-progress'] }, 1, 0] } }, // Fixed
+          resolved: { $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] } }, // Changed from completed
+          urgent: { $sum: { $cond: [{ $eq: ['$priority', 'Urgent'] }, 1, 0] } }, // Fixed case
+          highPriority: { $sum: { $cond: [{ $eq: ['$priority', 'High'] }, 1, 0] } } // Fixed case
         }
       }
     ])
   ]);
 
-  // Get staff list for assignment
   const staff = await User.find({
     $or: [
       { role: 'staff' },
@@ -384,13 +397,12 @@ const getOwnerDashboard = asyncHandler(async (req, res) => {
     success: true,
     data: {
       requests,
-      stats: stats[0] || { total: 0, pending: 0, inProgress: 0, completed: 0, emergency: 0, highPriority: 0 },
+      stats: stats[0] || { total: 0, pending: 0, inProgress: 0, resolved: 0, urgent: 0, highPriority: 0 },
       hostels: hostels.map(h => ({ id: h._id, name: h.name })),
       staff
     }
   });
 });
-
 
 const getRequestDetails = asyncHandler(async (req, res) => {
   const maintenance = await Maintenance.findById(req.params.id)
@@ -420,7 +432,7 @@ const getRequestDetails = asyncHandler(async (req, res) => {
 
 
 const createOwnerRequest = asyncHandler(async (req, res) => {
-  const { hostelId, room, bed, category, description, priority, studentId } = req.body;
+  const { hostelId, room, bed, category, title, description, priority, studentId } = req.body;
 
   const hostel = await Hostel.findOne({ _id: hostelId, owner: req.user._id });
   if (!hostel) {
@@ -431,7 +443,6 @@ const createOwnerRequest = asyncHandler(async (req, res) => {
   let raisedBy = req.user._id;
   let studentProfile = null;
 
-  // If creating on behalf of a student
   if (studentId) {
     const student = await Student.findOne({ _id: studentId, hostelId });
     if (student) {
@@ -440,6 +451,14 @@ const createOwnerRequest = asyncHandler(async (req, res) => {
     }
   }
 
+  // Map priority to match schema enum
+  const priorityMap = {
+    'low': 'Low',
+    'medium': 'Medium', 
+    'high': 'High',
+    'emergency': 'Urgent'
+  };
+
   const maintenance = await Maintenance.create({
     hostel: hostelId,
     room,
@@ -447,8 +466,9 @@ const createOwnerRequest = asyncHandler(async (req, res) => {
     raisedBy,
     studentProfile,
     category,
+    title: title || 'Maintenance Request',
     description,
-    priority: priority || 'medium',
+    priority: priorityMap[priority?.toLowerCase()] || 'Medium',
     status: 'pending',
     createdBy: 'owner',
     history: [{
@@ -467,6 +487,7 @@ const createOwnerRequest = asyncHandler(async (req, res) => {
     data: populated
   });
 });
+
 
 const assignStaff = asyncHandler(async (req, res) => {
   const { staffId, estimatedCost, scheduledDate, notes } = req.body;
@@ -490,7 +511,8 @@ const assignStaff = asyncHandler(async (req, res) => {
   }
 
   maintenance.assignedTo = staffId;
-  maintenance.status = 'in_progress';
+  maintenance.status = 'in-progress'; // Changed from 'in_progress'
+  
   if (estimatedCost) maintenance.estimatedCost = estimatedCost;
   if (scheduledDate) maintenance.scheduledDate = new Date(scheduledDate);
   if (notes) {
