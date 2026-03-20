@@ -69,7 +69,7 @@ router.get('/:id', getProperty);
 
 // Protected routes
 router.post('/', protect, createProperty);
-router.put('/:id', protect, updateProperty);
+router.put('/:id', updateProperty);
 router.delete('/:id', protect, deleteProperty);
 
 module.exports = router;

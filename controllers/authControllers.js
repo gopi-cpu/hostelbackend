@@ -7,6 +7,7 @@ const Room = require('../models/roomSchema')
 const Payment = require('../models/paymentSchema')
 const Notification = require('../models/notificationschema')
 const Maintenance = require('../models/Maintenance')
+const Student = require('../models/tenants');
 
 // Generate JWT
 const generateToken = (id) => {
@@ -382,6 +383,142 @@ exports.getUserDashboard = async (req, res, next) => {
     res.status(500).json({
       success: false,
       message: 'Server Error'
+    });
+  }
+};
+exports.getallstats = async (req, res) => {
+  try {
+    const { hostelId } = req.query;
+    const filter = hostelId ? { hostelId } : {};
+    const roomFilter = hostelId ? { hostel: hostelId } : {};
+
+    const [
+      totalStudents,
+      pendingBookings,
+      maintenanceRequests,
+      roomsStats,
+    ] = await Promise.all([
+      Student.countDocuments({ ...filter, status: 'active' }),
+      Booking.countDocuments({ ...filter, status: 'pending' }),
+      Maintenance.countDocuments({ ...filter, status: { $in: ['pending', 'in_progress'] } }),
+      
+      // FIXED aggregation
+      Room.aggregate([
+        { $match: roomFilter },
+        { 
+          $project: {
+            totalBeds: { $size: '$beds' },
+            
+            // TRUE occupied: isOccupied=true AND status=occupied (not reserved)
+            occupiedBeds: {
+              $size: {
+                $filter: {
+                  input: '$beds',
+                  as: 'bed',
+                  cond: { 
+                    $and: [
+                      { $eq: ['$$bed.isOccupied', true] },
+                      { $eq: ['$$bed.status', 'occupied'] }  // NOT reserved
+                    ]
+                  }
+                }
+              }
+            },
+            
+            // Reserved beds: status=reserved (regardless of isOccupied)
+            reservedBeds: {
+              $size: {
+                $filter: {
+                  input: '$beds',
+                  as: 'bed',
+                  cond: { $eq: ['$$bed.status', 'reserved'] }
+                }
+              }
+            },
+            
+            // Maintenance beds
+            maintenanceBeds: {
+              $size: {
+                $filter: {
+                  input: '$beds',
+                  as: 'bed',
+                  cond: { $eq: ['$$bed.status', 'maintenance'] }
+                }
+              }
+            },
+            
+            // Available beds: status=available AND isOccupied=false
+            availableBeds: {
+              $size: {
+                $filter: {
+                  input: '$beds',
+                  as: 'bed',
+                  cond: { 
+                    $and: [
+                      { $eq: ['$$bed.isOccupied', false] },
+                      { $eq: ['$$bed.status', 'available'] }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalBeds: { $sum: '$totalBeds' },
+            occupiedBeds: { $sum: '$occupiedBeds' },
+            reservedBeds: { $sum: '$reservedBeds' },
+            maintenanceBeds: { $sum: '$maintenanceBeds' },
+            availableBeds: { $sum: '$availableBeds' }
+          }
+        }
+      ]),
+    ]);
+
+    const totalBeds = roomsStats[0]?.totalBeds || 0;
+    const occupiedBeds = roomsStats[0]?.occupiedBeds || 0;
+    const reservedBeds = roomsStats[0]?.reservedBeds || 0;
+    const maintenanceBeds = roomsStats[0]?.maintenanceBeds || 0;
+    const availableBeds = roomsStats[0]?.availableBeds || 0;
+    
+    // Vacant = available only (not occupied, not reserved, not maintenance)
+    // OR if you want vacant = available + reserved (reserved can be filled)
+    const vacantBeds = availableBeds; // Strict: only truly available
+
+    console.log('Stats:', {
+      totalBeds,
+      occupiedBeds,
+      reservedBeds,
+      maintenanceBeds,
+      availableBeds,
+      vacantBeds
+    });
+
+    res.json({
+      success: true,
+      data: {
+        totalStudents,
+        vacantBeds,        // This will be 3 in your case
+        availableBeds,     // 3
+        reservedBeds,      // 1
+        totalBeds,         // 4
+        occupiedBeds,      // 0
+        maintenanceBeds,   // 0
+        pendingBookings,
+        maintenanceRequests,
+        duePayments: '₹42.5K', // placeholder
+        occupancyRate: totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0
+      }
+    });
+
+  } catch (error) {
+    console.error('Dashboard stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch dashboard stats',
+      error: error.message
     });
   }
 };

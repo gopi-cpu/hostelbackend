@@ -28,7 +28,7 @@ const bookingSchema = new mongoose.Schema({
   // Student Record Link (Created after check-in)
   student: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Student',
+    ref: 'Tenants',
     default: null  // Populated when booking is converted to student record
   },
 

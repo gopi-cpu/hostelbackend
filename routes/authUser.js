@@ -10,14 +10,15 @@ const {
   addFavorite,
   removeFavorite,
   getUserDashboard,
-  getProfileWithHostels
+  getProfileWithHostels,
+  getallstats
 } = require("../controllers/authControllers");
 const { protect } = require("../middleware/authMiddleware");
 const Property = require('../models/hostelschema');
 const MaintenanceTicket = require('../models/Maintenance');
 const Message = require('../models/message');
 const Booking = require('../models/bookingschema');
-
+const mongoose = require('mongoose'); 
 const asyncHandler = require('express-async-handler');
 
 // Auth
@@ -37,7 +38,7 @@ router.post("/reset-password/:token", resetPassword);
 router.post("/favorites", protect, addFavorite);
 router.delete("/favorites", protect, removeFavorite);
 router.get('/dashboard', protect, getUserDashboard);
-
+router.get('/allstats',getallstats)
 // @desc    Get PG details for user's current stay
 // @route   GET /api/auth/pg-details
 // @access  Private
@@ -73,8 +74,7 @@ router.get('/pg-details', protect, asyncHandler(async (req, res) => {
   
   // Find user's active booking
   const booking = await Booking.findOne({ 
-    user: req.user._id,
-    status: { $in: ['active', 'confirmed', 'checked-in'] }
+    user: req.user._id
   })
   .populate('hostel', 'name address images rating reviews amenities roomType foodType owner')
   .populate('room', 'roomNumber type rent')
@@ -82,12 +82,13 @@ router.get('/pg-details', protect, asyncHandler(async (req, res) => {
   console.log('booking',booking)
 
 
-  if (!booking) {
-    return res.status(404).json({
-      success: false,
-      message: 'No active booking found'
-    });
-  }
+    if (!booking) {
+      return res.status(200).json({
+        success: true,
+        data: null,
+        message: 'No active booking found'
+      });
+    }
 
   // Get property details with owner info
   const property = await Property.findById(booking.hostel._id)
@@ -149,6 +150,45 @@ router.get('/pg-details', protect, asyncHandler(async (req, res) => {
   });
 }));
 
+router.get('/tenant-details/:userId/:pgId', protect, asyncHandler(async (req, res) => {
+  const { userId, pgId } = req.params;
+
+  // Verify ownership
+  const property = await Property.findById(pgId);
+  if (!property || property.owner.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ success: false, message: 'Not authorized' });
+  }
+
+  const booking = await Booking.findOne({
+    user: userId,
+    hostel: pgId,
+    status: { $in: ['active', 'confirmed', 'checked-in'] }
+  })
+  .populate('user', 'name phone email avatar')
+  .populate('room', 'roomNumber');
+
+  if (!booking) {
+    return res.status(404).json({ success: false, message: 'Tenant not found' });
+  }
+
+  res.json({
+    success: true,
+    data: {
+      _id: booking.user._id,
+      name: booking.user.name,
+      phone: booking.user.phone,
+      email: booking.user.email,
+      avatar: booking.user.avatar,
+      roomNumber: booking.room?.roomNumber,
+      bookingStatus: booking.status,
+      checkInDate: booking.checkInDate,
+      checkOutDate: booking.checkOutDate,
+      monthlyRent: booking.rentAmount
+    }
+  });
+}));
+
+
 // @desc    Get maintenance tickets for user's PG
 // @route   GET /api/auth/maintenance-tickets
 // @access  Private
@@ -208,7 +248,6 @@ router.get('/messages/:pgId', protect, asyncHandler(async (req, res) => {
   const hasBooking = await Booking.exists({
     user: req.user._id,
     hostel: pgId,
-    status: { $in: ['active', 'confirmed', 'checked-in'] }
   });
   
   if (!hasBooking) {
@@ -284,6 +323,7 @@ router.get('/messages/:pgId', protect, asyncHandler(async (req, res) => {
 // @access  Private
 router.post('/message-owner', protect, asyncHandler(async (req, res) => {
   const { message, issueType = 'general', pgId, receiverId } = req.body;
+ const io = req.app.get('io');
 
   if (!message?.trim() || !pgId) {
     return res.status(400).json({
@@ -331,54 +371,212 @@ if (!validIssueTypes.includes(issueType.toLowerCase())) {
     st: 0   // sent
   });
 
+    const populatedMessage = await Message.findById(newMessage._id)
+    .populate('s', 'name')
+    .populate('r', 'name');
+
+  const formattedMessage = {
+    _id: populatedMessage._id,
+    text: populatedMessage.m,
+    type: 'text',
+    issueType: issueType.toLowerCase(),
+    status: 'sent',
+    createdAt: populatedMessage.c,
+    sender: {
+      _id: populatedMessage.s._id,
+      name: populatedMessage.s.name
+    },
+    receiver: {
+      _id: populatedMessage.r._id,
+      name: populatedMessage.r.name
+    }
+  };
+
+  // 🔥 SOCKET.IO: Emit to owner if online
+  const connectedOwners = req.app.get('connectedOwners');
+  const ownerSocketId = connectedOwners?.get(rId.toString());
+  
+  if (ownerSocketId && io) {
+    io.to(ownerSocketId).emit('new_message', {
+      message: formattedMessage,
+      pgId: pgId,
+      senderId: req.user._id.toString()
+    });
+    
+    // Update status to delivered
+    await Message.findByIdAndUpdate(newMessage._id, { st: 1 });
+    formattedMessage.status = 'delivered';
+  }
+
   // Return in readable format
   res.status(201).json({
     success: true,
-    data: {
-      _id: newMessage._id,
-      text: newMessage.m,
-      type: 'text',
-      issueType: issueType.toLowerCase(),
-      status: 'sent',
-      createdAt: newMessage.c,
-      sender: { _id: req.user._id, name: req.user.name },
-      receiver: { _id: rId }
-    }
+    data: formattedMessage
   });
 }));
+
+
+router.get('/messages/:userId/:pgId', protect, asyncHandler(async (req, res) => {
+  const { userId, pgId } = req.params;
+
+  // ✅ Add validation to check if parameters are valid ObjectIds
+  if (!userId || !pgId || userId === 'undefined' || pgId === 'undefined') {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Invalid or missing userId/pgId parameters' 
+    });
+  }
+
+  // Validate MongoDB ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(pgId) || !mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Invalid ObjectId format' 
+    });
+  }
+
+  // Verify ownership
+  const property = await Property.findById(pgId);
+  if (!property || property.owner.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ success: false, message: 'Not authorized' });
+  }
+
+  const messages = await Message.find({
+    p: pgId,
+    $or: [
+      { s: req.user._id, r: userId },
+      { s: userId, r: req.user._id }
+    ]
+  })
+  .populate('s', 'name')
+  .populate('r', 'name')
+  .sort({ c: -1 })
+  .lean();
+
+  // Mark incoming messages as delivered
+  const unreadIds = messages
+    .filter(m => m.r.toString() === req.user._id.toString() && m.st === 0)
+    .map(m => m._id);
+
+  if (unreadIds.length) {
+    await Message.updateMany(
+      { _id: { $in: unreadIds } },
+      { $set: { st: 1 } }
+    );
+  }
+
+  const formattedMessages = messages.map(msg => ({
+    _id: msg._id,
+    text: msg.m,
+    type: ['text', 'image', 'file'][msg.t] || 'text',
+    issueType: ['general', 'maintenance', 'payment', 'complaint', 'other'][msg.i] || 'general',
+    status: ['sent', 'delivered', 'read'][msg.st] || 'sent',
+    createdAt: msg.c,
+    sender: { _id: msg.s._id, name: msg.s.name },
+    receiver: { _id: msg.r._id, name: msg.r.name },
+    metadata: msg.meta || null
+  }));
+
+  res.json({ success: true, data: formattedMessages });
+}));
+
+router.post('/message-tenant', protect, asyncHandler(async (req, res) => {
+  const { message, userId, pgId, issueType = 'general' } = req.body;
+   const io = req.app.get('io'); 
+   const connectedUsers = req.app.get('connectedUsers');
+
+  // Verify ownership
+  const property = await Property.findById(pgId);
+  if (!property || property.owner.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ success: false, message: 'Not authorized' });
+  }
+
+  const issueTypeMap = {
+    'general': 0,
+    'maintenance': 1,
+    'payment': 2,
+    'complaint': 3,
+    'other': 4
+  };
+
+  const newMessage = await Message.create({
+    s: req.user._id,
+    r: userId,
+    p: pgId,
+    m: message.trim().slice(0, 2000),
+    t: 0, // text
+    i: issueTypeMap[issueType.toLowerCase()] || 0,
+    st: 0 // sent
+  });
+
+    const formattedMessage = {
+    _id: newMessage._id,
+    text: newMessage.m,
+    type: 'text',
+    issueType: issueType.toLowerCase(),
+    status: 'sent',
+    createdAt: newMessage.c,
+    sender: { _id: req.user._id, name: req.user.name },
+    receiver: { _id: userId }
+  };
+
+   const tenantSocketId = connectedUsers?.get(userId.toString());
+  
+  if (tenantSocketId && io) {
+    io.to(tenantSocketId).emit('new_message', {
+      message: formattedMessage,
+      pgId: pgId,
+      senderId: req.user._id.toString()
+    });
+    
+    // Update status to delivered
+    await Message.findByIdAndUpdate(newMessage._id, { st: 1 });
+    formattedMessage.status = 'delivered';
+  }
+
+  res.status(201).json({
+    success: true,
+    data: formattedMessage
+  });
+}));
+
 
 // @desc    Mark messages as read
 // @route   PUT /api/auth/messages/read
 // @access  Private
 router.put('/messages/read', protect, asyncHandler(async (req, res) => {
-  const { messageIds } = req.body;
-
-  if (!messageIds || !Array.isArray(messageIds)) {
-    return res.status(400).json({
-      success: false,
-      message: 'Message IDs array is required'
-    });
-  }
+   const { messageIds, senderId } = req.body; 
+    const io = req.app.get('io');
+  const connectedUsers = req.app.get('connectedUsers');
+  const connectedOwners = req.app.get('connectedOwners');
 
   await Message.updateMany(
     {
       _id: { $in: messageIds },
-      r: req.user._id  // Changed from 'receiver' to 'r'
+      r: req.user._id
     },
-    { 
+    {
       $set: {
-        st: 2,        // Changed from 'status' to 'st' (2 = read)
-        ra: new Date() // Changed from 'readAt' to 'ra'
+        st: 2, // read
+        ra: new Date()
       }
     }
   );
+   if (senderId && io) {
+    const senderSocketId = connectedOwners?.get(senderId.toString()) || 
+                          connectedUsers?.get(senderId.toString());
+    
+    if (senderSocketId) {
+      io.to(senderSocketId).emit('messages_read', {
+        messageIds: messageIds,
+        readBy: req.user._id.toString()
+      });
+    }
+  }
 
-  res.json({
-    success: true,
-    message: 'Messages marked as read'
-  });
+
+  res.json({ success: true, data: { updated: messageIds.length } });
 }));
-
 // @desc    Get unread messages count
 // @route   GET /api/auth/unread-messages
 // @access  Private
@@ -412,84 +610,182 @@ router.get('/unread-messages', protect, asyncHandler(async (req, res) => {
   });
 }));
 
+router.get('/unread-count', protect, asyncHandler(async (req, res) => {
+  // Get all owner properties
+  const properties = await Property.find({ owner: req.user._id }).select('_id');
+  const propertyIds = properties.map(p => p._id);
+
+  const total = await Message.countDocuments({
+    p: { $in: propertyIds },
+    r: req.user._id,
+    st: { $in: [0, 1] }
+  });
+
+  const byConversation = await Message.aggregate([
+    {
+      $match: {
+        p: { $in: propertyIds.map(id => require('mongoose').Types.ObjectId(id)) },
+        r: req.user._id,
+        st: { $in: [0, 1] }
+      }
+    },
+    {
+      $group: {
+        _id: { userId: '$s', pgId: '$p' },
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      total,
+      byConversation: byConversation.map(c => ({
+        userId: c._id.userId,
+        pgId: c._id.pgId,
+        count: c.count
+      }))
+    }
+  });
+}));
+
 // @desc    Get all conversations for user
 // @route   GET /api/auth/conversations
 // @access  Private
 router.get('/conversations', protect, asyncHandler(async (req, res) => {
-  const bookings = await Booking.find({ user: req.user._id })
-    .populate('hostel', 'name images owner')
-    .populate('hostel.owner', 'name phone email');
 
-  if (!bookings.length) {
+  const ownerId = req.user._id;
+
+  // 1️⃣ Get owner properties
+  const properties = await Property.find({ owner: ownerId }).select('_id');
+
+  if (!properties.length) {
     return res.json({ success: true, data: [] });
   }
 
-  const propertyIds = bookings.map(b => b.hostel._id);
+  const propertyIds = properties.map(p => p._id);
 
-  // Single aggregation for all data
-  const messageStats = await Message.aggregate([
+  // 2️⃣ Aggregation
+  const conversations = await Message.aggregate([
+
+    // messages related to owner's properties
     {
       $match: {
         p: { $in: propertyIds },
-        $or: [{ s: req.user._id }, { r: req.user._id }]
+        $or: [
+          { s: ownerId },
+          { r: ownerId }
+        ]
       }
     },
-    {
-      $sort: { c: -1 }
-    },
+
+    // newest first
+    { $sort: { c: -1 } },
+
+    // group by tenant + property
     {
       $group: {
-        _id: '$p',
-        lastMessage: { $first: '$$ROOT' },
+        _id: {
+          tenant: {
+            $cond: [
+              { $eq: ["$s", ownerId] },
+              "$r",
+              "$s"
+            ]
+          },
+          property: "$p"
+        },
+
+        lastMessage: { $first: "$$ROOT" },
+
         unreadCount: {
           $sum: {
             $cond: [
-              { $and: [
-                { $eq: ['$r', req.user._id] },
-                { $in: ['$st', [0, 1]] }
-              ]},
+              {
+                $and: [
+                  { $eq: ["$r", ownerId] },
+                  { $in: ["$st", [0,1]] }
+                ]
+              },
               1,
               0
             ]
           }
         }
       }
-    }
+    },
+
+    // join tenant info
+    {
+      $lookup: {
+        from: "users",
+        localField: "_id.tenant",
+        foreignField: "_id",
+        as: "tenant"
+      }
+    },
+
+    { $unwind: "$tenant" },
+
+    // join property info
+    {
+      $lookup: {
+        from: "properties",
+        localField: "_id.property",
+        foreignField: "_id",
+        as: "property"
+      }
+    },
+
+    { $unwind: "$property" },
+
+    // final structure
+    {
+      $project: {
+        _id: {
+          $concat: [
+            { $toString: "$tenant._id" },
+            "_",
+            { $toString: "$property._id" }
+          ]
+        },
+
+        userId: "$tenant._id",
+        userName: "$tenant.name",
+        userAvatar: "$tenant.avatar",
+
+        pgId: "$property._id",
+        pgName: "$property.name",
+
+        lastMessage: {
+          text: "$lastMessage.m",
+          createdAt: "$lastMessage.c",
+          sender: {
+            $cond: [
+              { $eq: ["$lastMessage.s", ownerId] },
+              "owner",
+              "tenant"
+            ]
+          }
+        },
+
+        unreadCount: 1
+      }
+    },
+
+    { $sort: { "lastMessage.createdAt": -1 } }
+
   ]);
 
-  // Create lookup map
-  const statsMap = new Map(messageStats.map(s => [s._id.toString(), s]));
-
-  const conversations = bookings.map(booking => {
-    const propId = booking.hostel._id.toString();
-    const stats = statsMap.get(propId);
-    
-    return {
-      _id: propId,
-      pgId: propId,
-      pgName: booking.hostel?.name || 'Unknown PG',
-      ownerName: booking.hostel?.owner?.name || 'Property Owner',
-      ownerId: booking.hostel?.owner?._id,
-      lastMessage: stats?.lastMessage ? {
-        text: stats.lastMessage.m,
-        createdAt: stats.lastMessage.c,
-        sender: stats.lastMessage.s.toString() === req.user._id.toString() 
-          ? 'You' 
-          : 'Owner' // Simplified, fetch name if needed
-      } : null,
-      unreadCount: stats?.unreadCount || 0,
-      bookingStatus: booking.status
-    };
+  res.json({
+    success: true,
+    data: conversations
   });
 
-  conversations.sort((a, b) => {
-    if (!a.lastMessage) return 1;
-    if (!b.lastMessage) return -1;
-    return new Date(b.lastMessage.createdAt) - new Date(a.lastMessage.createdAt);
-  });
-
-  res.json({ success: true, data: conversations });
 }));
+
+
 // @desc    Get user-specific payment history
 // @route   GET /api/auth/payments
 // @access  Private

@@ -365,6 +365,44 @@ const propertySchema = new mongoose.Schema({
     lastViewedAt: Date,
     popularityScore: { type: Number, default: 0 }
   },
+   ownerUpiId: {
+    type: String,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        return !v || /^[\w.-]+@[\w]+$/.test(v); // Basic UPI ID validation
+      },
+      message: 'Invalid UPI ID format'
+    }
+  },
+  
+  managerUpiId: {
+    type: String,
+    trim: true
+  },
+  
+  ownerPhone: {
+    type: String
+  },
+  
+  paymentSettings: {
+    acceptDirectUpi: {
+      type: Boolean,
+      default: true
+    },
+    requirePaymentProof: {
+      type: Boolean,
+      default: true
+    },
+    autoVerifyPayments: {
+      type: Boolean,
+      default: false
+    },
+    verificationTimeHours: {
+      type: Number,
+      default: 24
+    }
+  },
 
   createdAt: {
     type: Date,

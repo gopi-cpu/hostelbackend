@@ -1,46 +1,37 @@
-// routes/payments.js
 const express = require('express');
 const router = express.Router();
+const { protect, authorize } = require('../middleware/authMiddleware');
+const upload = require('../middleware/upload'); // For image upload
 const {
   getPayments,
   getPayment,
-  createPayment,
-  updatePayment,
-  deletePayment,
+  getUpiPaymentDetails,
+  submitPaymentProof,
+  verifyPayment,
+  getPendingVerifications,
+  checkPaymentStatus,
+  generateMonthlyBills,
   getUserPayments,
   getHostelPayments,
-  generateMonthlyBills,
-  processPaymentWebhook,
   getPaymentStats
 } = require('../controllers/paymentcontroller');
-
-const { protect, authorize } = require('../middleware/authMiddleware');
 
 // All routes are protected
 router.use(protect);
 
-router.route('/')
-  .get(getPayments)
-  .post(createPayment);
+// UPI Payment Routes
+router.get('/upi-details/:bookingId', getUpiPaymentDetails);
+router.post('/submit-proof/:paymentId', upload.single('paymentProof'), submitPaymentProof);
+router.get('/status/:paymentId', checkPaymentStatus);
+router.get('/pending-verifications', authorize('admin', 'owner'), getPendingVerifications);
+router.put('/verify/:paymentId', authorize('admin', 'owner'), verifyPayment);
 
-router.route('/stats')
-  .get(authorize('admin'), getPaymentStats);
-
-router.route('/generate-bills')
-  .post(authorize('admin'), generateMonthlyBills);
-
-router.route('/webhook')
-  .post(processPaymentWebhook);
-
-router.route('/user/:userId')
-  .get(getUserPayments);
-
-router.route('/hostel/:hostelId')
-  .get(authorize('admin', 'manager'), getHostelPayments);
-
-router.route('/:id')
-  .get(getPayment)
-  .put(authorize('admin'), updatePayment)
-  .delete(authorize('admin'), deletePayment);
+// Standard Routes
+router.get('/', getPayments);
+// router.get('/stats', authorize('admin'), getPaymentStats);
+// router.get('/user/:userId', getUserPayments);
+// router.get('/hostel/:hostelId', authorize('admin', 'owner', 'manager'), getHostelPayments);
+router.get('/:id', getPayment);
+router.post('/generate-bills', authorize('admin'), generateMonthlyBills);
 
 module.exports = router;

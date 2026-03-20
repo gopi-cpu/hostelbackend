@@ -1,9 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const Student = require("../models/student");
-const User = require("../models/authUser");  // Fixed: Use correct import
+const Student = require("../models/tenants");
+const User = require("../models/authUser");
 const Booking = require("../models/bookingschema");
-const Room = require('../models/roomSchema')
+const Room = require('../models/roomSchema');
+const crypto = require('crypto');
+
 // =======================
 // 📋 Get all students
 // GET /api/students?hostelId=xxx
@@ -40,7 +42,7 @@ router.get('/', async (req, res) => {
 // =======================
 // 🔍 Search students
 // GET /api/students/search?q=xxx&hostelId=xxx
-// IMPORTANT: This route must be BEFORE /:id
+// IMPORTANT: Must be BEFORE /:id
 // =======================
 router.get("/search", async (req, res) => {
   try {
@@ -58,7 +60,6 @@ router.get("/search", async (req, res) => {
         { name: { $regex: q, $options: "i" } },
         { email: { $regex: q, $options: "i" } },
         { phone: { $regex: q, $options: "i" } },
-        { studentId: { $regex: q, $options: "i" } },
       ],
     };
 
@@ -85,68 +86,176 @@ router.get("/search", async (req, res) => {
 });
 
 // =======================
-// ➕ Add new student (Admin creates student)
+// 📱 NEW: Check phone exists
+// GET /api/students/check-phone?phone=xxx
+// IMPORTANT: Must be BEFORE /:id
+// =======================
+router.get('/check-phone', async (req, res) => {
+  try {
+    const { phone } = req.query;
+    
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number is required'
+      });
+    }
+
+    const user = await User.findOne({ phone: phone.trim() })
+      .select('name email phone studentProfiles');
+
+    res.json({
+      success: true,
+      exists: !!user,
+      user: user ? {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        existingHostels: user.studentProfiles?.length || 0
+      } : null
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// =======================
+// 📱 Get student's hostels (for user app)
+// GET /api/students/user/:userId/hostels
+// IMPORTANT: Must be BEFORE /:id
+// =======================
+router.get('/user/:userId/hostels', async (req, res) => {
+  try {
+    const students = await Student.find({ 
+      userId: req.params.userId,
+      status: 'active'
+    })
+    .populate('hostelId', 'name address phone amenities')
+    .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      hostels: students.map(s => ({
+        studentRecordId: s._id,
+        hostel: s.hostelId,
+        room: s.room,
+        checkInDate: s.checkInDate
+      })),
+      count: students.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// =======================
+// ➕ Add new student (Phone-based flow)
 // POST /api/students
-// Cases handled: 
-// 1. New user + New student (createUserAccount=true)
-// 2. Existing user + New student (link to existing user)
-// 3. Just student record (no login)
+// 
+// FLOW:
+// 1. Check if user exists by PHONE NUMBER
+// 2. If NO user exists → Create new user account
+// 3. If user exists → Use existing user
+// 4. Check if user is already tenant in this hostel
+// 5. Create tenant record linked to user
 // =======================
 router.post('/', async (req, res) => {
   try {
     const {
       name,
       email,
-      phone,
+      phone,          // REQUIRED - used to check existing user
       room,           // Room ObjectId
       roomNumber,     // Room number string
       bedNumber,      // Bed number string
-      studentId,
       hostelId,
       emergencyContact,
-      createUserAccount = false,
-      password,
+      password,       // Optional: auto-generated if not provided
       dateOfBirth,
       gender,
       address,
       course,
       department,
+      notifyUser = true,
       source = 'direct-admin'
     } = req.body;
 
-    console.log('Creating student:', { name, email, studentId, hostelId, roomNumber, bedNumber });
+    console.log('Creating student:', { name, phone, email, hostelId, roomNumber, bedNumber });
 
-    // ===============================
     // 1️⃣ Validate required fields
-    // ===============================
-    if (!name || !email || !phone || !studentId || !hostelId) {
+    if (!name || !phone || !email || !hostelId) {
       return res.status(400).json({
         success: false,
-        message: 'Required fields: name, email, phone, studentId, hostelId'
+        message: 'Required fields: name, phone, email, hostelId'
       });
     }
 
-    // ===============================
-    // 2️⃣ Check duplicate student in same hostel
-    // ===============================
-    const existingStudent = await Student.findOne({ studentId, hostelId });
+    // 2️⃣ Check/Create User by PHONE NUMBER
+    let user = await User.findOne({ phone: phone.trim() });
+    let isNewUser = false;
+    let generatedPassword = null;
 
-    if (existingStudent) {
+    if (!user) {
+      // 🆕 CREATE NEW USER
+      isNewUser = true;
+      generatedPassword = password || generateTempPassword();
+      
+      // Check if email already exists (for different phone - data conflict)
+      const existingEmail = await User.findOne({ email: email.toLowerCase() });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already registered with different phone number'
+        });
+      }
+
+      user = new User({
+        name: name.trim(),
+        email: email.toLowerCase().trim(),
+        phone: phone.trim(),
+        password: generatedPassword,
+        role: 'student',
+        isVerified: true,
+        createdBy: 'admin'
+      });
+
+      await user.save();
+      console.log(`✅ New user created: ${user._id} with phone ${phone}`);
+    } else {
+      // 👤 USER EXISTS
+      console.log(`👤 Existing user found: ${user._id} with phone ${phone}`);
+    }
+
+    // 3️⃣ Check if already tenant in this hostel
+    const existingTenant = await Student.findOne({ 
+      userId: user._id, 
+      hostelId: hostelId,
+      status: { $in: ['active', 'suspended'] }
+    });
+
+    if (existingTenant) {
       return res.status(400).json({
         success: false,
-        message: `Student with ID ${studentId} already exists in this hostel`
+        message: 'This user is already a tenant in your hostel',
+        existingTenantId: existingTenant._id,
+        userId: user._id
       });
     }
 
-    // ===============================
-    // 3️⃣ Room + Bed Assignment
-    // ===============================
+    // 4️⃣ Room + Bed Assignment
     let assignedRoomId = null;
     let assignedRoomNumber = null;
     let assignedBedNumber = null;
+    let assignedBedId = null;
 
     if (room || roomNumber) {
-
       let roomQuery = { hostel: hostelId };
 
       if (room) {
@@ -167,12 +276,8 @@ router.post('/', async (req, res) => {
       assignedRoomId = foundRoom._id;
       assignedRoomNumber = foundRoom.roomNumber;
 
-      // If bed is provided
       if (bedNumber) {
-
-        const foundBed = foundRoom.beds.find(
-          bed => bed.bedNumber === bedNumber
-        );
+        const foundBed = foundRoom.beds.find(bed => bed.bedNumber === bedNumber);
 
         if (!foundBed) {
           return res.status(400).json({
@@ -188,77 +293,33 @@ router.post('/', async (req, res) => {
           });
         }
 
-        // Mark bed occupied
         foundBed.isOccupied = true;
         foundBed.status = "occupied";
-
+        assignedBedId = foundBed._id;
         assignedBedNumber = foundBed.bedNumber;
 
         await foundRoom.save();
       }
     }
 
-    // ===============================
-    // 4️⃣ Handle User Account Creation
-    // ===============================
-    let userId = null;
-    let userCreated = false;
-    let isExistingUser = false;
-
-    if (createUserAccount) {
-
-      const existingUser = await User.findOne({
-        email: email.toLowerCase()
-      });
-
-      if (existingUser) {
-        userId = existingUser._id;
-        isExistingUser = true;
-      } else {
-
-        if (!password) {
-          return res.status(400).json({
-            success: false,
-            message: "Password is required to create user account"
-          });
-        }
-
-        const newUser = new User({
-          name,
-          email: email.toLowerCase(),
-          phone,
-          password,
-          role: 'student',
-          isVerified: true
-        });
-
-        await newUser.save();
-
-        userId = newUser._id;
-        userCreated = true;
-      }
-    }
-
-    // ===============================
-    // 5️⃣ Create Student Record
-    // ===============================
+    // 5️⃣ Create Tenant Record
     const student = new Student({
-      name,
-      email: email.toLowerCase(),
-      phone,
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
       room: assignedRoomId,
       roomNumber: assignedRoomNumber,
+      bedId: assignedBedId,
       bedNumber: assignedBedNumber,
-      studentId,
       hostelId,
+      userId: user._id,
       dateOfBirth: dateOfBirth || null,
       gender: gender || null,
       address: address || null,
       course: course || null,
       department: department || null,
       emergencyContact: emergencyContact || {},
-      userId,
-      hasLoginAccess: !!userId,
+      hasLoginAccess: true,
       status: 'active',
       source,
       createdBy: 'admin',
@@ -267,27 +328,33 @@ router.post('/', async (req, res) => {
 
     await student.save();
 
-    // Link student profile to user
-    if (userId) {
-      await User.findByIdAndUpdate(userId, {
-        $addToSet: { studentProfiles: student._id }
-      });
+    // Add to user's student profiles
+    await User.findByIdAndUpdate(user._id, {
+      $addToSet: { studentProfiles: student._id }
+    });
+
+    // 6️⃣ Return Response
+    const responseData = {
+      success: true,
+      message: isNewUser 
+        ? 'New user account created and tenant added successfully' 
+        : 'Existing user linked and tenant added successfully',
+      student: await Student.findById(student._id)
+        .populate('userId', 'name email phone')
+        .populate('room', 'roomNumber floor'),
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone
+      }
+    };
+
+    if (isNewUser) {
+      responseData.temporaryPassword = generatedPassword;
     }
 
-    // ===============================
-    // 6️⃣ Final Response
-    // ===============================
-    res.status(201).json({
-      success: true,
-      message: userCreated
-        ? 'Student and new user account created successfully'
-        : isExistingUser
-          ? 'Student linked to existing user account'
-          : 'Student record created (no login)',
-      student: await Student.findById(student._id)
-        .populate('userId', 'name email')
-        .populate('room', 'roomNumber floor')
-    });
+    res.status(201).json(responseData);
 
   } catch (error) {
     console.error('Create student error:', error);
@@ -295,7 +362,7 @@ router.post('/', async (req, res) => {
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: 'Duplicate entry error',
+        message: 'Duplicate entry: This user is already a tenant in this hostel',
         error: error.message
       });
     }
@@ -311,7 +378,8 @@ router.post('/', async (req, res) => {
 // =======================
 // 👤 Get student by ID
 // GET /api/students/:id
-// =======================
+// THIS MUST BE AFTER all specific routes
+// =======================qq
 router.get("/:id", async (req, res) => {
   try {
     const student = await Student.findById(req.params.id)
@@ -321,7 +389,7 @@ router.get("/:id", async (req, res) => {
     if (!student) {
       return res.status(404).json({
         success: false,
-        message: "Student not found",
+        message: "Tenant not found",
       });
     }
 
@@ -348,41 +416,23 @@ router.put("/:id", async (req, res) => {
       updatedAt: new Date()
     };
 
-    // Don't allow changing critical fields directly
     delete updateData._id;
     delete updateData.createdAt;
-    
-    // Handle userId linking separately if provided
-    if (updateData.linkToUser) {
-      const user = await User.findById(updateData.linkToUser);
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found to link"
-        });
-      }
-      updateData.userId = user._id;
-      updateData.hasLoginAccess = true;
-      delete updateData.linkToUser;
-      
-      // Add to user's student profiles
-      await User.findByIdAndUpdate(user._id, {
-        $addToSet: { studentProfiles: req.params.id }
-      });
-    }
+    delete updateData.userId;
+    delete updateData.hostelId;
 
     const student = await Student.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
     )
-    .populate('userId', 'name email')
+    .populate('userId', 'name email phone')
     .populate('hostelId', 'name');
 
     if (!student) {
       return res.status(404).json({
         success: false,
-        message: "Student not found",
+        message: "Tenant not found",
       });
     }
 
@@ -399,15 +449,11 @@ router.put("/:id", async (req, res) => {
 });
 
 // =======================
-// ❌ Delete student (Soft delete recommended)
+// ❌ Delete student (Soft delete)
 // DELETE /api/students/:id
 // =======================
 router.delete("/:id", async (req, res) => {
   try {
-    // Option 1: Hard delete (your current approach)
-    // const student = await Student.findByIdAndDelete(req.params.id);
-    
-    // Option 2: Soft delete (recommended)
     const student = await Student.findByIdAndUpdate(
       req.params.id,
       { status: 'checked-out', checkOutDate: new Date() },
@@ -417,11 +463,19 @@ router.delete("/:id", async (req, res) => {
     if (!student) {
       return res.status(404).json({
         success: false,
-        message: "Student not found",
+        message: "Tenant not found",
       });
     }
 
-    // Remove from user's studentProfiles if linked
+    // Free up the bed if assigned
+    if (student.room && student.bedId) {
+      await Room.findOneAndUpdate(
+        { _id: student.room, 'beds._id': student.bedId },
+        { $set: { 'beds.$.isOccupied': false, 'beds.$.status': 'available' } }
+      );
+    }
+
+    // Remove from user's studentProfiles
     if (student.userId) {
       await User.findByIdAndUpdate(student.userId, {
         $pull: { studentProfiles: student._id }
@@ -430,7 +484,7 @@ router.delete("/:id", async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Student checked out successfully",
+      message: "Tenant checked out successfully",
       student
     });
   } catch (error) {
@@ -456,25 +510,23 @@ router.post('/:id/link-user', async (req, res) => {
     ]);
 
     if (!student) {
-      return res.status(404).json({ success: false, message: 'Student not found' });
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Update student
     student.userId = userId;
     student.hasLoginAccess = true;
     await student.save();
 
-    // Update user
     await User.findByIdAndUpdate(userId, {
       $addToSet: { studentProfiles: studentId }
     });
 
     res.json({
       success: true,
-      message: 'User linked to student successfully',
+      message: 'User linked to tenant successfully',
       student: await Student.findById(studentId).populate('userId', 'name email')
     });
   } catch (error) {
@@ -486,35 +538,10 @@ router.post('/:id/link-user', async (req, res) => {
 });
 
 // =======================
-// 📱 Get student's hostels (for user app)
-// GET /api/students/user/:userId/hostels
+// 🔧 Helper: Generate temporary password
 // =======================
-router.get('/user/:userId/hostels', async (req, res) => {
-  try {
-    const students = await Student.find({ 
-      userId: req.params.userId,
-      status: 'active'
-    })
-    .populate('hostelId', 'name address phone amenities')
-    .sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      hostels: students.map(s => ({
-        studentRecordId: s._id,
-        hostel: s.hostelId,
-        room: s.room,
-        studentId: s.studentId,
-        checkInDate: s.checkInDate
-      })),
-      count: students.length
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
+function generateTempPassword(length = 8) {
+  return crypto.randomBytes(length).toString('base64').slice(0, length).replace(/[^a-zA-Z0-9]/g, '9');
+}
 
 module.exports = router;
