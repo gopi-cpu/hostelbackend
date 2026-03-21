@@ -129,6 +129,7 @@ router.get('/check-phone', async (req, res) => {
 // IMPORTANT: Must be BEFORE /:id
 // =======================
 router.get('/user/:userId/hostels', async (req, res) => {
+ 
   try {
     const students = await Student.find({ 
       userId: req.params.userId,

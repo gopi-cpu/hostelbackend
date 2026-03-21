@@ -13,8 +13,8 @@ const generateUpiUrl = (upiId, name, amount, transactionNote) => {
 };
 
 // Helper function to generate deep links for specific apps
-const generateAppDeepLinks = (upiId, name, amount, note) => {
-  const baseUpiUrl = generateUpiUrl(upiId, name, amount, note);
+const generateAppDeepLinks = (upiId, name, amount, note,transactionRef) => {
+  const baseUpiUrl = generateUpiUrl(upiId, name, amount, note,transactionRef);
 
   return {
     generic: baseUpiUrl,
@@ -75,7 +75,7 @@ exports.getUpiPaymentDetails = async (req, res, next) => {
     }
     
     // Calculate amount
-    const amount = booking.monthlyRent || booking.rentAmount || 0;
+   const amount = Math.max(booking.monthlyRent || booking.rentAmount || 0, 10);
     const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
     
     // Generate unique transaction reference
@@ -86,7 +86,8 @@ exports.getUpiPaymentDetails = async (req, res, next) => {
   ownerUpiId,
   ownerName,
   amount,
-  `Rent ${currentMonth}`
+  `Rent ${currentMonth}`,
+  transactionRef
 );
     
     // Create or get pending payment record
