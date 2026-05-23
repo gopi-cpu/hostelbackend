@@ -122,13 +122,11 @@ const seedLocations = async () => {
     console.log('✅ MongoDB Connected for seeding');
 
     // Clear existing
-    console.log('Clearing existing data...');
+  
     await State.deleteMany();
     await City.deleteMany();
     await Area.deleteMany();
-    console.log('✅ Cleared existing data');
 
-    console.log('Seeding locations...');
 
     for (const stateData of locationData) {
       // Create State with location
@@ -214,4 +212,4 @@ const seedLocations = async () => {
   }
 };
 
-seedLocations();
+seedLocations();  

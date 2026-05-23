@@ -8,6 +8,7 @@ const Payment = require('../models/paymentSchema')
 const Notification = require('../models/notificationschema')
 const Maintenance = require('../models/Maintenance')
 const Student = require('../models/tenants');
+const { default: mongoose } = require("mongoose");
 
 // Generate JWT
 const generateToken = (id) => {
@@ -50,14 +51,13 @@ exports.registerUser = async (req, res) => {
 exports.verifyUser = async (req, res) => {
   try {
     const { token } = req.params;
-    console.log(token)
 
     // ✅ Decode token to get user id
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || "secret123");
     } catch (err) {
-      console.log(err)
+     
       return res.status(400).json({ message: "Invalid or expired token" });
     }
 
@@ -87,12 +87,15 @@ exports.verifyUser = async (req, res) => {
 // @desc Login
 exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
- console.log(email,password)
+  console.log('logina pi ')
   try {
     const user = await User.findOne({ email });
+      console.log('user',user)
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
+    
 
     const isMatch = await user.comparePassword(password);
+    
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
 
     res.json({
@@ -112,7 +115,7 @@ exports.loginUser = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     // ✅ Get token from header (Authorization: Bearer <token>)
-    console.log('profile')
+    
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "No token provided" });
@@ -386,17 +389,40 @@ exports.getUserDashboard = async (req, res, next) => {
     });
   }
 };
+
 exports.getallstats = async (req, res) => {
   try {
     const { hostelId } = req.query;
+    console.log('hhostelid',hostelId)
     const filter = hostelId ? { hostelId } : {};
-    const roomFilter = hostelId ? { hostel: hostelId } : {};
+    const roomFilter = hostelId
+ ? { hostel: new mongoose.Types.ObjectId(hostelId) }
+ : {};
+ console.log("roomFilter", roomFilter);
+
+const roomData = await Room.find(roomFilter);
+
+console.log("rooms found", roomData.length);
+
+    const rooms = await Room.find({ hostel: hostelId });
+
+console.log(
+  JSON.stringify(
+    rooms.map(r => ({
+      room: r.roomNumber,
+      beds: r.beds
+    })),
+    null,
+    2
+  )
+);
 
     const [
       totalStudents,
       pendingBookings,
       maintenanceRequests,
       roomsStats,
+      paymentStats   
     ] = await Promise.all([
       Student.countDocuments({ ...filter, status: 'active' }),
       Booking.countDocuments({ ...filter, status: 'pending' }),
@@ -449,19 +475,26 @@ exports.getallstats = async (req, res) => {
             
             // Available beds: status=available AND isOccupied=false
             availableBeds: {
-              $size: {
-                $filter: {
-                  input: '$beds',
-                  as: 'bed',
-                  cond: { 
-                    $and: [
-                      { $eq: ['$$bed.isOccupied', false] },
-                      { $eq: ['$$bed.status', 'available'] }
-                    ]
-                  }
-                }
-              }
+  $size: {
+    $filter: {
+      input: '$beds',
+      as: 'bed',
+      cond: {
+        $and: [
+          { $eq: ['$$bed.isOccupied', false] },
+          {
+            $not: {
+              $in: [
+                '$$bed.status',
+                ['occupied', 'maintenance']
+              ]
             }
+          }
+        ]
+      }
+    }
+  }
+}
           }
         },
         {
@@ -475,27 +508,73 @@ exports.getallstats = async (req, res) => {
           }
         }
       ]),
-    ]);
+           Payment.aggregate([
+            {
+              $match: {
+                ...(hostelId ? { hostel: new mongoose.Types.ObjectId(hostelId) } : {}),
+                paymentStatus: { $in: ['pending', 'partial', 'overdue'] }
+              }
+            },
+            {
+              $project: {
+                dueAmount: { $subtract: ['$totalAmount', '$amountPaid'] },
+                paymentStatus: 1
+              }
+            },
+            {
+              $group: {
+                _id: null,
+
+                // ✅ total due money
+                totalDue: { $sum: '$dueAmount' },
+
+                // ✅ total unpaid count
+                totalPendingCount: { $sum: 1 },
+
+                // ✅ only pending
+                pendingCount: {
+                  $sum: {
+                    $cond: [{ $eq: ['$paymentStatus', 'pending'] }, 1, 0]
+                  }
+                },
+
+                // ✅ overdue
+                overdueCount: {
+                  $sum: {
+                    $cond: [{ $eq: ['$paymentStatus', 'overdue'] }, 1, 0]
+                  }
+                },
+
+                // ✅ partial
+                partialCount: {
+                  $sum: {
+                    $cond: [{ $eq: ['$paymentStatus', 'partial'] }, 1, 0]
+                  }
+                }
+              }
+            }
+          ])
+               ]);
 
     const totalBeds = roomsStats[0]?.totalBeds || 0;
     const occupiedBeds = roomsStats[0]?.occupiedBeds || 0;
     const reservedBeds = roomsStats[0]?.reservedBeds || 0;
     const maintenanceBeds = roomsStats[0]?.maintenanceBeds || 0;
     const availableBeds = roomsStats[0]?.availableBeds || 0;
+    const totalDuePayments = paymentStats[0]?.totalDue || 0;
+    console.log('payment stats',paymentStats[0])
+    const pendingPaymentsCount = paymentStats[0]?.pendingCount || 0;
+    const overduePaymentsCount = paymentStats[0]?.overdueCount || 0;
     
     // Vacant = available only (not occupied, not reserved, not maintenance)
     // OR if you want vacant = available + reserved (reserved can be filled)
-    const vacantBeds = availableBeds; // Strict: only truly available
+   const vacantBeds =
+      totalBeds -
+      occupiedBeds -
+      reservedBeds -
+      maintenanceBeds;
 
-    console.log('Stats:', {
-      totalBeds,
-      occupiedBeds,
-      reservedBeds,
-      maintenanceBeds,
-      availableBeds,
-      vacantBeds
-    });
-
+      console.log('pendingpayments cound',pendingPaymentsCount,overduePaymentsCount,vacantBeds)
     res.json({
       success: true,
       data: {
@@ -508,7 +587,9 @@ exports.getallstats = async (req, res) => {
         maintenanceBeds,   // 0
         pendingBookings,
         maintenanceRequests,
-        duePayments: '₹42.5K', // placeholder
+       duePayments: totalDuePayments,
+      pendingPaymentsCount,
+      overduePaymentsCount,// placeholder
         occupancyRate: totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0
       }
     });
@@ -522,3 +603,6 @@ exports.getallstats = async (req, res) => {
     });
   }
 };
+
+
+

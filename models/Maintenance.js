@@ -31,7 +31,7 @@ const maintenanceSchema = new mongoose.Schema({
   // UPDATED: Match React Native CATEGORIES
   category: {
     type: String,
-    enum: ['plumbing', 'electrical', 'ac', 'furniture', 'cleaning', 'pest', 'internet', 'other'],
+    enum: ['plumbing', 'electrical','carpentry', 'ac', 'furniture', 'cleaning', 'pest', 'internet', 'other'],
     required: true
   },
   
@@ -50,7 +50,7 @@ const maintenanceSchema = new mongoose.Schema({
   // UPDATED: Match React Native PRIORITIES (capitalized)
   priority: {
     type: String,
-    enum: ['Low', 'Medium', 'High', 'Urgent'],
+    enum: ['Low', 'Medium', 'High', 'Emergency'],
     default: 'Medium'
   },
   
@@ -62,7 +62,7 @@ const maintenanceSchema = new mongoose.Schema({
   // UPDATED: Match React Native status values
   status: {
     type: String,
-    enum: ['pending', 'in-progress', 'resolved', 'closed'],
+    enum: ['pending', 'in-progress', 'completed', 'closed'],
     default: 'pending',
     index: true
   },

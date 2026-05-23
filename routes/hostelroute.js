@@ -54,7 +54,8 @@ const {
   getFeaturedProperties,
   getPropertiesByArea,
   getNearbyAreas,
-  getAreasByCity 
+  getAreasByCity, 
+  getPropertyByOwner
 } = require('../controllers/hostelcontroller');
 
 // Public routes
@@ -66,6 +67,7 @@ router.get('/nearby', getNearbyProperties);
 router.get('/search', searchProperties);
 router.get('/featured', getFeaturedProperties);
 router.get('/:id', getProperty);
+router.get('/ownerhostel/:id',getPropertyByOwner)
 
 // Protected routes
 router.post('/', protect, createProperty);

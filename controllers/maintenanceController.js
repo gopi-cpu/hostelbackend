@@ -10,7 +10,7 @@ const mongoose = require('mongoose');
 // @route   POST /api/maintenance
 // @access  Private (Student/Admin)
 const createMaintenanceRequest = asyncHandler(async (req, res) => {
-  const { hostelId, room, bed, category, description, priority, images } = req.body;
+  const { hostelId, room, bed,  title, category, description, priority, images, } = req.body;
      const io = req.app.get('io');
       const connectedOwners = req.app.get('connectedOwners');
       const connectedUsers = req.app.get('connectedUsers'); 
@@ -40,6 +40,7 @@ const createMaintenanceRequest = asyncHandler(async (req, res) => {
     room,
     bed: bed || null,
     raisedBy: req.user._id,
+    title: title || category, 
     category,
     description,
     priority: priority || 'medium',
@@ -200,6 +201,7 @@ const getMaintenanceRequest = asyncHandler(async (req, res) => {
 // @access  Private (Admin/Owner/Staff)
 const updateMaintenanceStatus = asyncHandler(async (req, res) => {
   const { status, assignedTo, estimatedCost, actualCost, completionDate } = req.body;
+  conso
 
   const maintenance = await Maintenance.findById(req.params.id);
 
@@ -653,54 +655,55 @@ const getRequestDetails = asyncHandler(async (req, res) => {
 });
 
 
-const createOwnerRequest = asyncHandler(async (req, res) => {
-  const { hostelId, room, bed, category, description, priority, studentId } = req.body;
+  const createOwnerRequest = asyncHandler(async (req, res) => {
+    const { hostelId,title, room, bed, category, description, priority, studentId } = req.body;
 
-  const hostel = await Hostel.findOne({ _id: hostelId, owner: req.user._id });
-  if (!hostel) {
-    res.status(404);
-    throw new Error('Hostel not found or not authorized');
-  }
-
-  let raisedBy = req.user._id;
-  let studentProfile = null;
-
-  // If creating on behalf of a student
-  if (studentId) {
-    const student = await Student.findOne({ _id: studentId, hostelId });
-    if (student) {
-      raisedBy = student.userId || req.user._id;
-      studentProfile = student._id;
+    const hostel = await Hostel.findOne({ _id: hostelId, owner: req.user._id });
+    if (!hostel) {
+      res.status(404);
+      throw new Error('Hostel not found or not authorized');
     }
-  }
 
-  const maintenance = await Maintenance.create({
-    hostel: hostelId,
-    room,
-    bed: bed || null,
-    raisedBy,
-    studentProfile,
-    category,
-    description,
-    priority: priority || 'medium',
-    status: 'pending',
-    createdBy: 'owner',
-    history: [{
-      action: 'created',
-      performedBy: req.user._id,
-      details: 'Request created by owner'
-    }]
+    let raisedBy = req.user._id;
+    let studentProfile = null;
+
+    // If creating on behalf of a student
+    if (studentId) {
+      const student = await Student.findOne({ _id: studentId, hostelId });
+      if (student) {
+        raisedBy = student.userId || req.user._id;
+        studentProfile = student._id;
+      }
+    }
+
+    const maintenance = await Maintenance.create({
+      hostel: hostelId,
+      title,
+      room,
+      bed: bed || null,
+      raisedBy,
+      studentProfile,
+      category,
+      description,
+      priority: priority || 'medium',
+      status: 'pending',
+      createdBy: 'owner',
+      history: [{
+        action: 'created',
+        performedBy: req.user._id,
+        details: 'Request created by owner'
+      }]
+    });
+
+    const populated = await Maintenance.findById(maintenance._id)
+      .populate('raisedBy', 'name email')
+      .populate('hostel', 'name');
+
+    res.status(201).json({
+      success: true,
+      data: populated
+    });
   });
-
-  const populated = await Maintenance.findById(maintenance._id)
-    .populate('raisedBy', 'name email')
-    .populate('hostel', 'name');
-
-  res.status(201).json({
-    success: true,
-    data: populated
-  });
-});
 
 const assignStaff = asyncHandler(async (req, res) => {
   const { staffId, estimatedCost, scheduledDate, notes } = req.body;

@@ -4,7 +4,7 @@ const paymentSchema = new mongoose.Schema({
   booking: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
-    required: true
+    required: false
   },
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -55,11 +55,14 @@ const paymentSchema = new mongoose.Schema({
     },
     payerUpiId: {
       type: String
-    }
+    },
+    paymentProofUrl: String, // Screenshot
+    paymentProofUploadedAt: Date
   },
   
   paymentProof: {
     type: String, // URL to screenshot/image of payment
+    default:null,
     required: function() {
       return this.paymentMethod === 'upi' && this.upiPayment?.enabled;
     }
@@ -143,36 +146,74 @@ const paymentSchema = new mongoose.Schema({
 
 // Generate receipt number before saving
 paymentSchema.pre('save', async function(next) {
-  if (this.isNew && !this.receiptNumber && this.paymentStatus === 'paid') {
+  if (this.isNew && !this.receiptNumber) {
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     this.receiptNumber = `RCP${timestamp}${random}`;
   }
   next();
 });
+paymentSchema.pre('save', function (next) {
+  try {
+    // ✅ Safe defaults (avoid crash)
+    const additionalCharges = this.additionalCharges || [];
+    const discounts = this.discounts || [];
 
-// Pre-save middleware to calculate totals and update payment status
-paymentSchema.pre('save', function(next) {
-  const additionalTotal = this.additionalCharges.reduce((sum, charge) => sum + charge.amount, 0);
-  const discountTotal = this.discounts.reduce((sum, discount) => sum + discount.amount, 0);
-  
-  this.totalAmount = this.rentAmount + this.lateFee + additionalTotal - discountTotal;
-  
-  // Update payment status based on amount paid
-  if (this.amountPaid >= this.totalAmount) {
-    this.paymentStatus = this.verificationStatus === 'verified' || this.verificationStatus === 'not_required' 
-      ? 'paid' 
-      : 'awaiting_verification';
-  } else if (this.amountPaid > 0) {
-    this.paymentStatus = 'partial';
-  } else if (new Date() > this.dueDate) {
-    this.paymentStatus = 'overdue';
-  } else {
-    this.paymentStatus = 'pending';
+    const additionalTotal = additionalCharges.reduce(
+      (sum, charge) => sum + (charge.amount || 0),
+      0
+    );
+
+    const discountTotal = discounts.reduce(
+      (sum, discount) => sum + (discount.amount || 0),
+      0
+    );
+
+    // ✅ Calculate total amount
+    this.totalAmount =
+      (this.rentAmount || 0) +
+      (this.lateFee || 0) +
+      additionalTotal -
+      discountTotal;
+
+    // ✅ PAYMENT STATUS LOGIC (FIXED 🚀)
+
+    // 🟢 1. Fully paid
+    if (this.amountPaid >= this.totalAmount && this.totalAmount > 0) {
+      this.paymentStatus =
+        this.verificationStatus === 'verified' ||
+        this.verificationStatus === 'not_required'
+          ? 'paid'
+          : 'awaiting_verification';
+    }
+
+    // 🟡 2. Partial payment
+    else if (this.amountPaid > 0 && this.amountPaid < this.totalAmount) {
+      this.paymentStatus = 'partial';
+    }
+
+    // 🔴 3. NEW BILL → ALWAYS PENDING (IMPORTANT FIX)
+    else if (this.isNew) {
+      this.paymentStatus = 'pending';
+    }
+
+    // 🔴 4. Existing bill → check overdue
+    else if (new Date() > this.dueDate) {
+      this.paymentStatus = 'overdue';
+    }
+
+    // ⚪ 5. Default fallback
+    else {
+      this.paymentStatus = 'pending';
+    }
+
+    // ✅ Update timestamp
+    this.updatedAt = Date.now();
+
+    next();
+  } catch (error) {
+    next(error);
   }
-  
-  this.updatedAt = Date.now();
-  next();
 });
 
 // Index for better query performance

@@ -25,6 +25,7 @@ const students = require('./routes/students')
 const locationController = require('./routes/locationRoutes')
 const uploadRoutes  = require('./routes/upload')
 const maintenance  = require('./routes/maintenanceRoutes')
+const reminderRoutes = require('./routes/reminders')
 const Message = require('./models/message')
 const Property = require('./models/hostelschema')
 const path = require('path');
@@ -293,6 +294,7 @@ app.set('io', io);
 app.use(cookieParser());
 // Connect DB
 connectDB();
+require('./cron/paymentCron');
 
 app.use(hpp());
 
@@ -330,6 +332,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // // Routes
 app.use("/api/auth", userRoutes);
 app.use('/api/students', students);
+app.use('/api/tenants', reminderRoutes);
 app.use('/api/properties', hostels);
 app.use('/api/:hostelId/reviews', require('./routes/reviewroute'));
 app.use('/api/bookings',Bookings)
@@ -342,6 +345,8 @@ app.use('/api/v1/hostels/:hostelId/beds', bedRoutes);
 app.use('/api/location',locationController)
 app.use('/api/upload', uploadRoutes);
 app.use('/api/maintenance',maintenance)
+
+
 
 app.get('/',(req,res)=>{
   res.send('running')

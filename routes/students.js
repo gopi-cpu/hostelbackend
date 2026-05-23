@@ -329,6 +329,32 @@ router.post('/', async (req, res) => {
 
     await student.save();
 
+    const checkIn = new Date();
+const checkOut = new Date();
+checkOut.setMonth(checkOut.getMonth() + 1); // default 1 month (or pass from req)
+
+    const monthlyRent = 5000; // ⚠️ replace with real value (from room/bed)
+const securityDeposit = monthlyRent;
+
+    const booking = await Booking.create({
+      user: user._id,
+      hostel: hostelId,
+      room: assignedRoomId,
+      bed: assignedBedId,
+      student: student._id, // link tenant
+      checkInDate: checkIn,
+      checkOutDate: checkOut,
+      rentAmount: monthlyRent,
+      securityDeposit: securityDeposit,
+      totalAmount: monthlyRent,
+      pendingAmount: 0,
+     emergencyContact: JSON.stringify(emergencyContact),
+      status: 'checkedIn', // 🔥 VERY IMPORTANT
+      createdBy: 'admin-booking'
+    });
+
+    await booking.save()
+
     // Add to user's student profiles
     await User.findByIdAndUpdate(user._id, {
       $addToSet: { studentProfiles: student._id }
@@ -531,6 +557,33 @@ router.post('/:id/link-user', async (req, res) => {
       student: await Student.findById(studentId).populate('userId', 'name email')
     });
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// GET /api/students/my-stay
+router.get('/my-stay' , async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const tenant = await Student.findOne({
+      userId: userId,
+      status: 'active'
+    })
+    .populate('hostelId', 'name address')
+    .populate('room', 'roomNumber floor');
+
+    res.status(200).json({
+      success: true,
+      hasStay: true,
+      data: tenant
+    });
+
+  } catch (error) {
+    console.error('My stay error:', error);
     res.status(500).json({
       success: false,
       message: error.message

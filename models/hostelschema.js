@@ -27,13 +27,9 @@ const propertySchema = new mongoose.Schema({
   subType: {
     type: String,
     enum: [
-      // Hostel/PG types - MATCHES FRONTEND
       'boys', 'girls', 'coed', 'working_professionals',
-      // Room types  
       'single', 'shared', 'studio',
-      // Flat types
       '1bhk', '2bhk', '3bhk', '4bhk', 'studio_apartment',
-      // House types
       'independent', 'villa', 'bungalow', 'row_house'
     ]
   },
@@ -46,6 +42,45 @@ const propertySchema = new mongoose.Schema({
     index: true
   },
 
+  // ============ NEW: ROOM LIMITS & MEMBERSHIP TRACKING ============
+  roomLimits: {
+    maxAllowed: {
+      type: Number,
+      default: 15, // Basic plan default
+      min: 1,
+      max: 1000
+    },
+    currentTotal: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    lastUpdated: {
+      type: Date,
+      default: Date.now
+    },
+    warningTriggered: {
+      type: Boolean,
+      default: false
+    },
+    membershipAtCreation: {
+      type: String,
+      enum: ['basic', 'premium', 'pro', 'enterprise'],
+      default: 'basic'
+    },
+    overriddenByAdmin: {
+      type: Boolean,
+      default: false
+    },
+    overrideReason: String,
+    overrideDate: Date
+  },
+
+  // Rooms configuration - ADD THIS SECTION (if not already present)
+rooms: [{
+   type: mongoose.Schema.Types.ObjectId,
+   ref: "Room"
+}],
   // Location (Enhanced for "Near Me" feature)
   location: {
     address: {
@@ -64,7 +99,7 @@ const propertySchema = new mongoose.Schema({
         default: 'Point'
       },
       coordinates: {
-        type: [Number], // [longitude, latitude]
+        type: [Number],
         required: true
       }
     },
@@ -72,9 +107,9 @@ const propertySchema = new mongoose.Schema({
     distanceFromCityCenter: Number
   },
   geohash: {
-  type: String,
-  index: true
-},
+    type: String,
+    index: true
+  },
 
   // Contact Info
   contact: {
@@ -89,7 +124,7 @@ const propertySchema = new mongoose.Schema({
     }
   },
 
-  // PricingA
+  // Pricing
   pricing: {
     monthlyRent: {
       amount: { type: Number, required: true, index: true },
@@ -162,34 +197,20 @@ const propertySchema = new mongoose.Schema({
     }
   },
 
-  // Amenities - UPDATED to match frontend FACILITIES_LIST
+  // Amenities
   amenities: [{
     type: String,
     enum: [
-      // Frontend: 'wifi', 'ac', 'laundry', 'kitchen', 'parking', 'gym', 'security', 'cleaning', 
-      // 'hotwater', 'tv', 'study', 'mess', 'power_backup', 'elevator', 'cctv'
-      
-      // Basic
       'wifi', 'fan', 'light', 'furniture', 'power_backup',
-      // Comfort
-      'ac', 'cooler', 'heater', 'geyser', 'hot_water', 'hotwater', // hotwater alias
-      // Food
+      'ac', 'cooler', 'heater', 'geyser', 'hot_water', 'hotwater',
       'food', 'breakfast', 'lunch', 'dinner', 'kitchen', 'fridge', 'microwave', 'mess',
-      // Laundry
-      'washing_machine', 'dryer', 'ironing', 'laundry_service', 'laundry', // laundry alias
-      // Entertainment
+      'washing_machine', 'dryer', 'ironing', 'laundry_service', 'laundry',
       'tv', 'dth', 'netflix', 'gaming_area', 'common_room',
-      // Security
-      'security_guard', 'security', 'cctv', 'biometric', 'digital_lock', 'intercom', // security alias
-      // Health
+      'security_guard', 'security', 'cctv', 'biometric', 'digital_lock', 'intercom',
       'gym', 'yoga_area', 'medical_facility', 'first_aid',
-      // Convenience
-      'power_backup', 'elevator', 'parking', 'housekeeping', 'cleaning', 'maintenance', // cleaning alias
-      // Study/Work
-      'study_table', 'bookshelf', 'work_desk', 'meeting_room', 'study', // study alias
-      // Outdoor
+      'power_backup', 'elevator', 'parking', 'housekeeping', 'cleaning', 'maintenance',
+      'study_table', 'bookshelf', 'work_desk', 'meeting_room', 'study',
       'balcony', 'terrace', 'garden', 'playground',
-      // Social
       'cafeteria', 'mess', 'dining_hall'
     ]
   }],
@@ -216,12 +237,12 @@ const propertySchema = new mongoose.Schema({
     entryExitTimings: String
   },
 
-  // Food Details - UPDATED to match frontend
+  // Food Details
   food: {
     provided: { type: Boolean, default: false },
     type: {
       type: String,
-      enum: ['veg', 'non_veg', 'non-veg', 'jain', 'all', 'both'] // Added 'non-veg' and 'both' aliases
+      enum: ['veg', 'non_veg', 'non-veg', 'jain', 'all', 'both']
     },
     mealsIncluded: [{
       type: String,
@@ -233,7 +254,7 @@ const propertySchema = new mongoose.Schema({
     sampleMenu: String
   },
 
-  // Room/Unit Details
+  // Unit Details
   unitDetails: {
     roomSize: {
       value: Number,
@@ -245,7 +266,7 @@ const propertySchema = new mongoose.Schema({
     },
     furnished: {
       type: String,
-      enum: ['unfurnished', 'semi_furnished', 'fully_furnished'], // Added hyphenated version
+      enum: ['unfurnished', 'semi_furnished', 'fully_furnished'],
       default: 'fully_furnished'
     },
     bathroomType: {
@@ -259,7 +280,7 @@ const propertySchema = new mongoose.Schema({
     totalFloors: Number
   },
 
-  // Images with categories - UPDATED to match frontend
+  // Images
   images: [{
     url: { type: String, required: true },
     thumbnail: String,
@@ -365,12 +386,13 @@ const propertySchema = new mongoose.Schema({
     lastViewedAt: Date,
     popularityScore: { type: Number, default: 0 }
   },
-   ownerUpiId: {
+  
+  ownerUpiId: {
     type: String,
     trim: true,
     validate: {
       validator: function(v) {
-        return !v || /^[\w.-]+@[\w]+$/.test(v); // Basic UPI ID validation
+        return !v || /^[\w.-]+@[\w]+$/.test(v);
       },
       message: 'Invalid UPI ID format'
     }
@@ -415,7 +437,7 @@ const propertySchema = new mongoose.Schema({
   }
 });
 
-// Indexes
+// ============ INDEXES ============
 propertySchema.index({ 'location.coordinates': '2dsphere' });
 propertySchema.index({ propertyType: 1, status: 1 });
 propertySchema.index({ 'pricing.monthlyRent.amount': 1 });
@@ -425,17 +447,68 @@ propertySchema.index({ 'featured.isFeatured': 1, 'featured.featurePriority': -1 
 propertySchema.index({ tags: 1 });
 propertySchema.index({ amenities: 1 });
 propertySchema.index({ geohash: 1, status: 1 });
+propertySchema.index({ 'roomLimits.currentTotal': 1, 'roomLimits.maxAllowed': 1 }); // NEW INDEX
 
-// Virtual for full address
+// ============ VIRTUAL FIELDS ============
 propertySchema.virtual('fullAddress').get(function() {
   const addr = this.location?.address;
   if (!addr) return '';
   return `${addr.street || ''}, ${addr.area || ''}, ${addr.city || ''}, ${addr.state || ''} - ${addr.pincode || ''}`;
 });
 
-// Pre-save middleware
+// ============ NEW: VIRTUAL FOR ROOM USAGE PERCENTAGE ============
+propertySchema.virtual('roomUsagePercentage').get(function() {
+  if (!this.roomLimits.maxAllowed) return 0;
+  return (this.roomLimits.currentTotal / this.roomLimits.maxAllowed) * 100;
+});
+
+// ============ NEW: VIRTUAL FOR ROOM LIMIT STATUS ============
+propertySchema.virtual('roomLimitStatus').get(function() {
+  const percentage = this.roomUsagePercentage;
+  if (percentage >= 100) return 'exceeded';
+  if (percentage >= 90) return 'critical';
+  if (percentage >= 75) return 'warning';
+  if (percentage >= 50) return 'moderate';
+  return 'good';
+});
+
+// ============ METHODS ============
+// NEW: Method to check if can add rooms
+propertySchema.methods.canAddRooms = function(additionalRooms = 1) {
+  const newTotal = this.roomLimits.currentTotal + additionalRooms;
+  return newTotal <= this.roomLimits.maxAllowed || this.roomLimits.overriddenByAdmin;
+};
+
+// NEW: Method to update room count
+propertySchema.methods.updateRoomCount = async function () {
+
+   const Room = mongoose.model("Room");
+
+   const totalRooms = await Room.countDocuments({
+      hostel: this._id
+   });
+
+   this.roomLimits.currentTotal = totalRooms;
+   this.roomLimits.lastUpdated = new Date();
+
+   return totalRooms;
+};
+// NEW: Method to get remaining room capacity
+propertySchema.methods.getRemainingRoomCapacity = function() {
+  return Math.max(0, this.roomLimits.maxAllowed - this.roomLimits.currentTotal);
+};
+
+// ============ PRE-SAVE MIDDLEWARE ============
 propertySchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  
+  // Auto-calculate total rooms from rooms array
+  if (this.rooms && Array.isArray(this.rooms)) {
+    const totalRooms = this.rooms.reduce((sum, room) => sum + (room.count || 0), 0);
+    this.roomLimits.currentTotal = totalRooms;
+    this.availability.totalUnits = totalRooms;
+    this.availability.availableUnits = totalRooms; // Initially all rooms available
+  }
   
   // Auto-calculate price category
   const rent = this.pricing?.monthlyRent?.amount || 0;
@@ -444,27 +517,27 @@ propertySchema.pre('save', function(next) {
   else if (rent < 25000) this.pricing.priceCategory = 'premium';
   else this.pricing.priceCategory = 'luxury';
 
+  // Set geohash
   if (
-  this.location &&
-  this.location.coordinates &&
-  Array.isArray(this.location.coordinates.coordinates)
-) {
-  const [lng, lat] = this.location.coordinates.coordinates;
-
-  if (lat && lng) {
-    this.geohash = ngeohash.encode(lat, lng, 6);
+    this.location &&
+    this.location.coordinates &&
+    Array.isArray(this.location.coordinates.coordinates)
+  ) {
+    const [lng, lat] = this.location.coordinates.coordinates;
+    if (lat && lng) {
+      this.geohash = ngeohash.encode(lat, lng, 6);
+    }
   }
-}
+  
   // Set full address
   if (this.location?.address) {
     this.location.address.fullAddress = this.fullAddress;
   }
   
-  // Normalize food.type: convert 'both' to 'all'
+  // Normalize food.type
   if (this.food?.type === 'both') {
     this.food.type = 'all';
   }
-  // Normalize food.type: convert 'non-veg' to 'non_veg'
   if (this.food?.type === 'non-veg') {
     this.food.type = 'non_veg';
   }
@@ -484,4 +557,48 @@ propertySchema.pre('save', function(next) {
   next();
 });
 
-module.exports = mongoose.model('Property', propertySchema);23
+// ============ POST INIT MIDDLEWARE ============
+propertySchema.post('init', function(doc) {
+  // Ensure roomLimits exists even if not in DB (for old documents)
+  if (!doc.roomLimits) {
+    doc.roomLimits = {
+      maxAllowed: 15,
+      currentTotal: 0,
+      lastUpdated: new Date(),
+      membershipAtCreation: 'basic'
+    };
+  }
+});
+
+// ============ STATIC METHODS ============
+// NEW: Find properties by room availability
+propertySchema.statics.findByRoomAvailability = function(minAvailable = 1) {
+  return this.find({
+    'rooms.available': { $gte: minAvailable },
+    status: 'active'
+  });
+};
+
+// NEW: Find properties nearing room limit
+propertySchema.statics.findNearingRoomLimit = function(threshold = 80) {
+  return this.aggregate([
+    {
+      $addFields: {
+        roomLimitPercentage: {
+          $multiply: [
+            { $divide: ['$roomLimits.currentTotal', '$roomLimits.maxAllowed'] },
+            100
+          ]
+        }
+      }
+    },
+    {
+      $match: {
+        roomLimitPercentage: { $gte: threshold },
+        'roomLimits.currentTotal': { $lt: '$roomLimits.maxAllowed' }
+      }
+    }
+  ]);
+};
+
+module.exports = mongoose.model('Property', propertySchema);

@@ -34,6 +34,41 @@ const userSchema = new mongoose.Schema({
     enum: ['student', 'admin', 'owner', 'staff'],
     default: 'student'
   },
+    membership: {
+    type: {
+      type: String,
+      enum: ['basic', 'premium', 'pro', 'enterprise'],
+      default: 'basic'
+    },
+    startDate: Date,
+    endDate: Date,
+    isActive: {
+      type: Boolean,
+      default: true
+    },
+    features: {
+      maxRoomsPerProperty: {
+        type: Number,
+        default: 15
+      },
+      maxProperties: {
+        type: Number,
+        default: 1
+      },
+      canAddPhotos: {
+        type: Number,
+        default: 10
+      },
+      prioritySupport: {
+        type: Boolean,
+        default: false
+      }
+    }
+  },
+    ownedProperties: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Hostel'
+  }],
   isVerified: {
     type: Boolean,
     default: false
@@ -61,6 +96,42 @@ const userSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+
+userSchema.methods.getMembershipLimits = function() {
+  const limits = {
+    basic: {
+      maxRoomsPerProperty: 15,
+      maxProperties: 1,
+      maxPhotosPerProperty: 10,
+      prioritySupport: false,
+      featuredListing: false
+    },
+    premium: {
+      maxRoomsPerProperty: 25,
+      maxProperties: 3,
+      maxPhotosPerProperty: 20,
+      prioritySupport: true,
+      featuredListing: false
+    },
+    pro: {
+      maxRoomsPerProperty: 30,
+      maxProperties: 5,
+      maxPhotosPerProperty: 30,
+      prioritySupport: true,
+      featuredListing: true
+    },
+    enterprise: {
+      maxRoomsPerProperty: 100,
+      maxProperties: 999,
+      maxPhotosPerProperty: 50,
+      prioritySupport: true,
+      featuredListing: true
+    }
+  };
+  
+  return limits[this.membership.type] || limits.basic;
+};
+
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {

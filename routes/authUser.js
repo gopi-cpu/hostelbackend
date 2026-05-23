@@ -18,6 +18,7 @@ const Property = require('../models/hostelschema');
 const MaintenanceTicket = require('../models/Maintenance');
 const Message = require('../models/message');
 const Booking = require('../models/bookingschema');
+const Payment = require('../models/paymentSchema')
 const mongoose = require('mongoose'); 
 const asyncHandler = require('express-async-handler');
 
@@ -76,10 +77,12 @@ router.get('/pg-details', protect, asyncHandler(async (req, res) => {
   const booking = await Booking.findOne({ 
     user: req.user._id
   })
-  .populate('hostel', 'name address images rating reviews amenities roomType foodType owner')
+  .populate('hostel', 'name address images rating reviews amenities roomType foodType owner paymentSettings')
   .populate('room', 'roomNumber type rent')
   .sort({ createdAt: -1 });
   console.log('booking',booking)
+
+
 
 
     if (!booking) {
@@ -89,6 +92,11 @@ router.get('/pg-details', protect, asyncHandler(async (req, res) => {
         message: 'No active booking found'
       });
     }
+    const payments = await Payment.find({
+  user: req.user._id,
+  hostel: booking.hostel._id
+})
+.sort({ dueDate: -1 }); // latest first
 
   // Get property details with owner info
   const property = await Property.findById(booking.hostel._id)
@@ -100,6 +108,24 @@ router.get('/pg-details', protect, asyncHandler(async (req, res) => {
       message: 'Property not found'
     });
   }
+
+        const formattedPayments = payments.map(p => ({
+        _id: p._id,
+        month: p.month,
+        year: p.year,
+        rentAmount: p.rentAmount,
+        totalAmount: p.totalAmount,
+        amountPaid: p.amountPaid,
+        dueDate: p.dueDate,
+        paymentStatus: p.paymentStatus,
+        verificationStatus: p.verificationStatus,
+        receiptNumber: p.receiptNumber,
+
+        upi: {
+          enabled: p.upiPayment?.enabled,
+          ownerUpiId: p.upiPayment?.ownerUpiId
+        }
+      }));
 
   // Calculate days remaining
   const today = new Date();
@@ -145,7 +171,8 @@ router.get('/pg-details', protect, asyncHandler(async (req, res) => {
         ),
         checkInDate: booking.startDate,
         checkOutDate: booking.endDate
-      }
+      },
+      payments: formattedPayments
     }
   });
 }));
@@ -653,26 +680,30 @@ router.get('/unread-count', protect, asyncHandler(async (req, res) => {
 // @desc    Get all conversations for user
 // @route   GET /api/auth/conversations
 // @access  Private
-router.get('/conversations', protect, asyncHandler(async (req, res) => {
-
+router.get('/conversations/:propertyId', protect, asyncHandler(async (req, res) => {
   const ownerId = req.user._id;
+  const { propertyId } = req.params; // Get from URL parameter
 
-  // 1️⃣ Get owner properties
-  const properties = await Property.find({ owner: ownerId }).select('_id');
+  
 
-  if (!properties.length) {
-    return res.json({ success: true, data: [] });
+  // 1️⃣ Verify this property belongs to the owner
+  const property = await Property.findOne({ 
+    _id: propertyId, 
+    owner: ownerId 
+  });
+
+  if (!property) {
+    return res.status(404).json({ 
+      success: false, 
+      message: 'Property not found or not owned by you' 
+    });
   }
 
-  const propertyIds = properties.map(p => p._id);
-
-  // 2️⃣ Aggregation
+  // 2️⃣ Aggregation - only for this specific property
   const conversations = await Message.aggregate([
-
-    // messages related to owner's properties
     {
       $match: {
-        p: { $in: propertyIds },
+        p: new mongoose.Types.ObjectId(propertyId), // Filter by specific property
         $or: [
           { s: ownerId },
           { r: ownerId }
@@ -683,29 +714,30 @@ router.get('/conversations', protect, asyncHandler(async (req, res) => {
     // newest first
     { $sort: { c: -1 } },
 
-    // group by tenant + property
+    {
+      $addFields: {
+        tenantId: {
+          $cond: [
+            { $eq: ["$s", ownerId] },
+            "$r",
+            "$s"
+          ]
+        }
+      }
+    },
+
+    // group by tenant (since property is already filtered)
     {
       $group: {
-        _id: {
-          tenant: {
-            $cond: [
-              { $eq: ["$s", ownerId] },
-              "$r",
-              "$s"
-            ]
-          },
-          property: "$p"
-        },
-
+        _id: "$tenantId", // Group by tenant only
         lastMessage: { $first: "$$ROOT" },
-
         unreadCount: {
           $sum: {
             $cond: [
               {
                 $and: [
                   { $eq: ["$r", ownerId] },
-                  { $in: ["$st", [0,1]] }
+                  { $in: ["$st", [0, 1]] }
                 ]
               },
               1,
@@ -720,43 +752,24 @@ router.get('/conversations', protect, asyncHandler(async (req, res) => {
     {
       $lookup: {
         from: "users",
-        localField: "_id.tenant",
+        localField: "_id",
         foreignField: "_id",
         as: "tenant"
       }
     },
-
     { $unwind: "$tenant" },
-
-    // join property info
-    {
-      $lookup: {
-        from: "properties",
-        localField: "_id.property",
-        foreignField: "_id",
-        as: "property"
-      }
-    },
-
-    { $unwind: "$property" },
 
     // final structure
     {
       $project: {
-        _id: {
-          $concat: [
-            { $toString: "$tenant._id" },
-            "_",
-            { $toString: "$property._id" }
-          ]
-        },
-
+        _id: { $toString: "$tenant._id" },
         userId: "$tenant._id",
         userName: "$tenant.name",
         userAvatar: "$tenant.avatar",
-
-        pgId: "$property._id",
-        pgName: "$property.name",
+        
+        // Property info (same for all since filtered by property)
+        pgId: property._id,
+        pgName: property.name,
 
         lastMessage: {
           text: "$lastMessage.m",
@@ -775,37 +788,107 @@ router.get('/conversations', protect, asyncHandler(async (req, res) => {
     },
 
     { $sort: { "lastMessage.createdAt": -1 } }
-
   ]);
 
   res.json({
     success: true,
     data: conversations
   });
-
 }));
+
+router.get('/membership', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('membership');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    
+    const limits = user.getMembershipLimits();
+    
+    res.json({
+      success: true,
+      data: {
+        type: user.membership.type,
+        isActive: user.membership.isActive,
+        startDate: user.membership.startDate,
+        endDate: user.membership.endDate,
+        limits: limits,
+        features: user.membership.features
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+
+router.post('/upgrade-membership', protect, async (req, res) => {
+  try {
+    const { planType } = req.body;
+    const validPlans = ['basic', 'premium', 'pro', 'enterprise'];
+    
+    if (!validPlans.includes(planType)) {
+      return res.status(400).json({ success: false, message: 'Invalid plan type' });
+    }
+    
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    
+    // Update membership
+    user.membership.type = planType;
+    user.membership.startDate = new Date();
+    
+    // Set end date based on plan (e.g., 30 days for monthly plans)
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + 30);
+    user.membership.endDate = endDate;
+    user.membership.isActive = true;
+    
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: `Membership upgraded to ${planType}`,
+      data: {
+        type: user.membership.type,
+        startDate: user.membership.startDate,
+        endDate: user.membership.endDate
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+
 
 
 // @desc    Get user-specific payment history
 // @route   GET /api/auth/payments
 // @access  Private
-router.get('/payments', protect, asyncHandler(async (req, res) => {
-  const booking = await Booking.findOne({ 
-    user: req.user._id,
-    status: { $in: ['active', 'confirmed', 'checked-in', 'completed'] }
-  }).populate('payments');
 
-  if (!booking || !booking.payments) {
-    return res.json({
-      success: true,
-      data: []
-    });
-  }
+// router.get('/payments', protect, asyncHandler(async (req, res) => {
+//   console.log('payments api')
+//   const booking = await Booking.findOne({ 
+//     user: req.user._id,
+//     status: { $in: ['active', 'confirmed', 'checked-in', 'completed'] }
+//   }).populate('payments');
 
-  res.json({
-    success: true,
-    data: booking.payments
-  });
-}));
+//   if (!booking || !booking.payments) {
+//     return res.json({
+//       success: true,
+//       data: []
+//     });
+//   }
+
+//   res.json({
+//     success: true,
+//     data: booking.payments
+//   });
+// }));
 
 module.exports = router;

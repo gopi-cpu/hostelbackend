@@ -464,8 +464,7 @@ exports.getProperties = async (req, res) => {
       }
     });
 
-    console.log('Initial queryObj:', queryObj);
-
+  
     // Status filter
     if (req.query.status) {
       queryObj.status = req.query.status;
@@ -521,7 +520,7 @@ exports.getProperties = async (req, res) => {
         }
       };
       
-      console.log('🔥 Using CURRENT LOCATION geospatial query:', { lat, lng, radius: radius + 'km' });
+     
     }
     
     // Priority 2: "Near Me" explicit query
@@ -537,7 +536,7 @@ exports.getProperties = async (req, res) => {
           $maxDistance: radius * 1000
         }
       };
-      console.log('🔥 Using NEAR ME geospatial query:', { lat, lng, radius: radius + 'km' });
+    
     }
     
     // Priority 3: City AND/OR Area filtering
@@ -553,7 +552,7 @@ exports.getProperties = async (req, res) => {
             $options: 'i' 
           }
         });
-        console.log('🔥 City filter added:', cityName);
+     
       }
 
       // Area filtering
@@ -702,6 +701,52 @@ exports.getProperty = async (req, res) => {
   }
 };
 
+
+exports.getPropertyByOwner = async (req, res) => {
+  try {
+    console.log('get properties by owner', req.params.id);
+
+    const properties = await Property.find({ owner: req.params.id })
+      .populate('owner', 'name phone email profileImage')
+      .populate('reviews');
+
+    if (!properties || properties.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+
+    // ✅ ADD THIS BLOCK ONLY (SAFE)
+    const Room = require('../models/roomSchema'); // adjust path if needed
+
+    for (let prop of properties) {
+      const rooms = await Room.find({ hostel: prop._id }).populate('beds');
+      prop._doc.rooms = rooms; // attach rooms without modifying schema
+    }
+
+    // ✅ KEEP YOUR EXISTING LOGIC SAME
+    for (let prop of properties) {
+      prop.stats = prop.stats || {};
+      prop.stats.totalViews = (prop.stats.totalViews || 0) + 1;
+      prop.stats.lastViewedAt = new Date();
+      await prop.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      data: properties
+    });
+
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      success: false,
+      message: 'Server Error'
+    });
+  }
+};
+
 // @desc    Create property
 // @route   POST /api/v1/properties
 // @access  Private
@@ -709,6 +754,10 @@ exports.createProperty = async (req, res) => {
   try {
     req.body.owner = req.user.id;
 
+         if (req.body.paymentSettings?.ownerUpiId) {
+      req.body.ownerUpiId = req.body.paymentSettings.ownerUpiId;
+    }
+    
     // Geocode address to get coordinates
     if (!req.body.location?.coordinates?.coordinates) {
       const address = `${req.body.location.address.street}, ${req.body.location.address.area}, ${req.body.location.address.city}`;
@@ -721,6 +770,8 @@ exports.createProperty = async (req, res) => {
         };
       }
     }
+
+    
 
     const property = await Property.create(req.body);
 
